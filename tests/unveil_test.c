@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
@@ -1456,6 +1457,359 @@ t_mount_refused_after_commit(void)
 	CHECK(syscall(155 /* pivot_root */, A, A) == -1);
 }
 
+/* ------------------------------------------------------------------ */
+/* the narrowing check against what the kernel really does             */
+/* ------------------------------------------------------------------ */
+
+enum { MR = 1, MW = 2, MX = 4, MC = 8, MS = 16 };
+enum { K_DIR, K_FILE, K_SOCK };
+enum { OP_READ, OP_READDIR, OP_WRITE, OP_TRUNC, OP_EXEC, OP_CREATE, OP_MKDIR, OP_UNLINK, OP_CONNECT, NOPS };
+
+static void
+mcopy(const char *src, const char *dst)
+{
+	char b[65536];
+	ssize_t n;
+	int i = open(src, O_RDONLY), o = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+
+	CHECK(i >= 0 && o >= 0);
+	while ((n = read(i, b, sizeof b)) > 0)
+		CHECK(write(o, b, (size_t)n) == n);
+	close(i);
+	close(o);
+	chmod(dst, 0755);
+}
+
+static int
+mexec(const char *p)
+{
+	pid_t c = fork();
+	int st;
+
+	if (c == 0) {
+		char *a[] = { (char *)p, "--child", NULL };
+
+		execv(p, a);
+		_exit(99);
+	}
+	waitpid(c, &st, 0);
+	return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
+static int
+mconnect(const char *p)
+{
+	struct sockaddr_un a;
+	int s = socket(AF_UNIX, SOCK_STREAM, 0), ok;
+
+	memset(&a, 0, sizeof a);
+	a.sun_family = AF_UNIX;
+	snprintf(a.sun_path, sizeof a.sun_path, "%s", p);
+	ok = connect(s, (struct sockaddr *)&a, sizeof a) == 0;
+	close(s);
+	return ok;
+}
+
+/* the tree of one case: a directory d with the inner object in it. the listener keeps the socket alive */
+static void
+mtree(int idx, int kind, char *d, char *in)
+{
+	char p[PATH_MAX + 64];
+	struct sockaddr_un a;
+	int s;
+
+	snprintf(d, PATH_MAX, "%s/mx%d", root, idx);
+	CHECK(mkdir(d, 0755) == 0);
+	snprintf(in, PATH_MAX, "%s/%s", d, kind == K_DIR ? "in" : kind == K_FILE ? "inF" : "inS");
+	if (kind == K_DIR) {
+		CHECK(mkdir(in, 0755) == 0);
+		snprintf(p, sizeof p, "%s/f", in);
+		mcopy(self, p);
+		snprintf(p, sizeof p, "%s/g", in);
+		mcopy(self, p);
+	} else if (kind == K_FILE)
+		mcopy(self, in);
+	if (kind != K_FILE) {
+		snprintf(p, sizeof p, "%s", in);
+		if (kind == K_DIR)
+			snprintf(p, sizeof p, "%s/sock", in);
+		memset(&a, 0, sizeof a);
+		a.sun_family = AF_UNIX;
+		snprintf(a.sun_path, sizeof a.sun_path, "%s", p);
+		s = socket(AF_UNIX, SOCK_STREAM, 0);
+		CHECK(bind(s, (struct sockaddr *)&a, sizeof a) == 0 && listen(s, 16) == 0);
+	}
+}
+
+/* which operations work on the inner object, once the domain is entered. the exec goes first: a write would empty the file */
+static unsigned
+mprobe(const char *in, int kind)
+{
+	char p[PATH_MAX + 64];
+	unsigned seen = 0;
+	int fd;
+
+	if (kind == K_DIR) {
+		snprintf(p, sizeof p, "%s/f", in);
+		if (mexec(p))
+			seen |= 1u << OP_EXEC;
+		if ((fd = open(p, O_RDONLY)) >= 0) {
+			seen |= 1u << OP_READ;
+			close(fd);
+		}
+		{
+			DIR *dp = opendir(in);
+
+			if (dp) {
+				seen |= 1u << OP_READDIR;
+				closedir(dp);
+			}
+		}
+		if ((fd = open(p, O_WRONLY)) >= 0) {
+			seen |= 1u << OP_WRITE;
+			close(fd);
+		}
+		if (truncate(p, 0) == 0)
+			seen |= 1u << OP_TRUNC;
+		snprintf(p, sizeof p, "%s/new", in);
+		if (mknod(p, S_IFREG | 0600, 0) == 0)
+			seen |= 1u << OP_CREATE;
+		snprintf(p, sizeof p, "%s/newd", in);
+		if (mkdir(p, 0755) == 0)
+			seen |= 1u << OP_MKDIR;
+		snprintf(p, sizeof p, "%s/sock", in);
+		if (mconnect(p))
+			seen |= 1u << OP_CONNECT;
+		snprintf(p, sizeof p, "%s/g", in);
+		if (unlink(p) == 0)
+			seen |= 1u << OP_UNLINK;
+	} else if (kind == K_FILE) {
+		if (mexec(in))
+			seen |= 1u << OP_EXEC;
+		if ((fd = open(in, O_RDONLY)) >= 0) {
+			seen |= 1u << OP_READ;
+			close(fd);
+		}
+		if ((fd = open(in, O_WRONLY)) >= 0) {
+			seen |= 1u << OP_WRITE;
+			close(fd);
+		}
+		if (truncate(in, 0) == 0)
+			seen |= 1u << OP_TRUNC;
+		if (unlink(in) == 0)
+			seen |= 1u << OP_UNLINK;
+	} else {
+		if (mconnect(in))
+			seen |= 1u << OP_CONNECT;
+		if (unlink(in) == 0)
+			seen |= 1u << OP_UNLINK;
+	}
+	return seen;
+}
+
+/* what the permission letters of the inner rule ask for */
+static unsigned
+mintended(unsigned I, int kind)
+{
+	unsigned m = 0;
+
+	if (I & MR)
+		m |= (1u << OP_READ) | (kind == K_DIR ? 1u << OP_READDIR : 0);
+	if (I & MW)
+		m |= (1u << OP_WRITE) | (1u << OP_TRUNC);
+	if (I & MX)
+		m |= 1u << OP_EXEC;
+	if ((I & MC) && kind == K_DIR)
+		m |= (1u << OP_CREATE) | (1u << OP_MKDIR) | (1u << OP_UNLINK);
+	if (I & MS)
+		m |= 1u << OP_CONNECT;
+	return m;
+}
+
+static void
+mletters(unsigned m, char *o)
+{
+	const char *l = "rwxcs";
+	int i, n = 0;
+
+	for (i = 0; i < 5; i++)
+		if (m & (1u << i))
+			o[n++] = l[i];
+	o[n] = 0;
+}
+
+/* the same rights as the library maps them, written again here so that a mistake in either shows */
+static uint64_t
+mrights(unsigned p, int isdir)
+{
+	uint64_t r = 0;
+
+	if (p & MR)
+		r |= VOW_LL_FS_READ_FILE | (isdir ? VOW_LL_FS_READ_DIR : 0);
+	if (p & MW)
+		r |= VOW_LL_FS_WRITE_FILE | VOW_LL_FS_TRUNCATE;
+	if (p & MX)
+		r |= VOW_LL_FS_EXECUTE;
+	if (p & MS)
+		r |= VOW_LL_FS_RESOLVE_UNIX;
+	if ((p & MC) && isdir)
+		r |= VOW_LL_FS_MAKE_REG | VOW_LL_FS_MAKE_DIR | VOW_LL_FS_MAKE_SYM | VOW_LL_FS_MAKE_SOCK |
+		    VOW_LL_FS_MAKE_FIFO | VOW_LL_FS_REMOVE_FILE | VOW_LL_FS_REMOVE_DIR | VOW_LL_FS_REFER;
+	return r;
+}
+
+static int
+mrule(int rs, const char *path, uint64_t r)
+{
+	struct vow_path_beneath pb;
+	int fd = open(path, O_PATH | O_CLOEXEC), rc;
+
+	CHECK(fd >= 0);
+	pb.allowed_access = r;
+	pb.parent_fd = fd;
+	rc = (int)syscall(VOW_SYS_landlock_add_rule, rs, VOW_LL_RULE_PATH_BENEATH, &pb, 0);
+	close(fd);
+	return rc;
+}
+
+/*
+ * mode 0: the library takes the rules (outer first), commits, and the probe runs; the result is the
+ * operations seen, or ~0u if the library refused them (ENOTSUP).
+ * mode 1: the same, inner rule first.
+ * mode 2: a ruleset of our own with the same rights, no library: what the kernel does with both rules.
+ * the result goes back through a pipe, because the domain cannot be left.
+ */
+static unsigned
+mcase(int idx, unsigned O, unsigned I, int kind, int mode)
+{
+	int pf[2];
+	pid_t c;
+	unsigned v = 0;
+
+	CHECK(pipe(pf) == 0);
+	c = fork();
+	if (c == 0) {
+		char d[PATH_MAX], in[PATH_MAX];
+
+		mtree(idx * 3 + mode, kind, d, in);
+		if (mode == 2) {
+			struct vow_ruleset_attr6 at;
+			int rs;
+
+			memset(&at, 0, sizeof at);
+			at.handled_access_fs = VOW_LL_FS_HANDLED | VOW_LL_FS_RESOLVE_UNIX;
+			rs = (int)syscall(VOW_SYS_landlock_create_ruleset, &at, sizeof at, 0);
+			CHECK(rs >= 0);
+			CHECK(mrule(rs, d, mrights(O, 1)) == 0 && mrule(rs, in, mrights(I, kind == K_DIR)) == 0);
+			CHECK(prctl(VOW_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0);
+			CHECK(syscall(VOW_SYS_landlock_restrict_self, rs, 0) == 0);
+		} else {
+			char po[8], pi[8];
+
+			mletters(O, po);
+			mletters(I, pi);
+			if (mode == 0) {
+				OK(unveil(d, po));
+				errno = 0;
+				if (unveil(in, pi) < 0) {
+					CHECK(errno == ENOTSUP);
+					v = ~0u;
+				}
+			} else {
+				OK(unveil(in, pi));
+				errno = 0;
+				if (unveil(d, po) < 0) {
+					CHECK(errno == ENOTSUP);
+					v = ~0u;
+				}
+			}
+			if (v == 0)
+				OK(unveil(NULL, NULL));
+		}
+		if (v == 0)
+			v = mprobe(in, kind);
+		CHECK(write(pf[1], &v, sizeof v) == (ssize_t)sizeof v);
+		_exit(0);
+	}
+	close(pf[1]);
+	CHECK(read(pf[0], &v, sizeof v) == (ssize_t)sizeof v);
+	close(pf[0]);
+	waitpid(c, NULL, 0);
+	return v;
+}
+
+/*
+ * for every pair of permission sets (outer on a directory, inner on a directory, a regular file or a socket
+ * node below it): the library refuses the pair exactly when the kernel would leave more access on the inner
+ * object than the inner rule asked for. accepted pairs are enforced as asked (no extra operation works), and
+ * refused pairs do leak (seen with a ruleset of our own). a rule that only the library could be wrong about
+ * shows up as one of the counted disagreements.
+ */
+static void
+t_conflict_matches_kernel(void)
+{
+	unsigned O, I;
+	int kind, idx = 0, leaks = 0, accepted = 0, refused = 0, bad = 0, abi = real_abi();
+	char lo[8], li[8];
+
+	if (abi < VOW_UNIX_ABI)
+		SKIP("needs abi 9 for the s permission");
+	for (kind = K_DIR; kind <= K_SOCK; kind++)
+		for (O = 1; O < 32; O++) {
+			if ((O & MX) && !(O & MR))
+				continue;
+			for (I = 1; I < 32; I++) {
+				unsigned lib0, lib1, raw, extra;
+
+				if ((I & MX) && !(I & MR))
+					continue;
+				if (kind != K_DIR && (I & MC))
+					continue;
+				if (kind == K_FILE && (I & MS))
+					continue;
+				if (kind == K_SOCK && (I & (MR | MW | MX)))
+					continue;
+				idx++;
+				mletters(O, lo);
+				mletters(I, li);
+				lib0 = mcase(idx, O, I, kind, 0);
+				lib1 = mcase(idx, O, I, kind, 1);
+				if (lib0 != lib1) {
+					printf("    the order of the rules changes the answer: outer %s inner %s kind %d\n", lo, li, kind);
+					bad++;
+					continue;
+				}
+				if (lib0 == ~0u) {
+					/* refused: the kernel must leave something extra, or the refusal was for nothing */
+					refused++;
+					raw = mcase(idx, O, I, kind, 2);
+					extra = raw & ~mintended(I, kind);
+					if (extra == 0) {
+						printf("    refused for nothing: outer %s inner %s kind %d\n", lo, li, kind);
+						bad++;
+					} else
+						leaks++;
+				} else {
+					accepted++;
+					extra = lib0 & ~mintended(I, kind);
+					if (extra) {
+						printf("    accepted but not enforced: outer %s inner %s kind %d, extra 0x%x\n", lo, li, kind, extra);
+						bad++;
+					}
+					if (lib0 != mintended(I, kind)) {
+						printf("    accepted but less than asked: outer %s inner %s kind %d, got 0x%x asked 0x%x\n",
+						    lo, li, kind, lib0, mintended(I, kind));
+						bad++;
+					}
+				}
+			}
+		}
+	printf("    %d pairs: %d accepted and enforced as asked, %d refused (%d of them leak with a ruleset of our own)\n",
+	    idx, accepted, refused, leaks);
+	CHECK(bad == 0);
+	CHECK(refused == leaks && accepted > 100 && refused > 100);
+}
+
 static const struct test tests[] = {
 	{ "args", t_args, 0 },
 	{ "read only", t_read_only, 0 },
@@ -1473,6 +1827,7 @@ static const struct test tests[] = {
 	{ "conflict child narrower", t_conflict_child_narrower, 0 },
 	{ "conflict parent wider", t_conflict_parent_wider, 0 },
 	{ "conflict on replace", t_conflict_replace_checks, 0 },
+	{ "the narrowing check against the kernel, every pair", t_conflict_matches_kernel, 0 },
 	{ "child wider is fine", t_child_wider_ok, 0 },
 	{ "string prefix is not ancestor", t_prefix_not_ancestor, 0 },
 	{ "path escapes", t_escape, 0 },
@@ -1539,7 +1894,7 @@ main(int argc, char **argv)
 		return 1;
 	}
 	printf("kernel landlock abi: %d\n", real_abi());
-	rc = t_main(tests, (int)(sizeof tests / sizeof *tests), 61);
+	rc = t_main(tests, (int)(sizeof tests / sizeof *tests), 62);
 	snprintf(cmd, sizeof cmd, "rm -rf '%s'", root);
 	if (system(cmd) != 0)
 		rc = 1;

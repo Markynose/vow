@@ -24,6 +24,7 @@ struct entry {
 	unsigned perms;
 	dev_t dev;
 	ino_t ino;
+	mode_t mode;		/* the type of the inode, for the narrowing check */
 	char *path;		/* canonical, only for the narrowing check */
 };
 
@@ -158,22 +159,40 @@ is_ancestor(const char *a, const char *b)
 }
 
 /*
+ * the letters of a rule above an object that can reach it, by the type of the object. measured on a real
+ * kernel for every pair of permission sets (DESIGN.md section 2.6): a rule on a directory passes its rights
+ * to everything below it, and all of them matter for a directory. for a regular file the connect right
+ * (s) cannot matter; for a socket node nothing can read, write or execute it, only connect (s) and
+ * remove it (c) matter.
+ */
+static unsigned
+reach(mode_t mode)
+{
+	if (S_ISREG(mode))
+		return P_R | P_W | P_X | P_C;
+	if (S_ISSOCK(mode))
+		return P_S | P_C;
+	return P_R | P_W | P_X | P_C | P_S;
+}
+
+/*
  * landlock only adds rights down a tree, it cannot take them away, so a
  * child rule with fewer permissions than an ancestor cannot be enforced.
- * refuse instead of leaving the extra access in place. string based and
- * therefore best effort (bind mounts, hardlinks), not a security boundary.
+ * refuse instead of leaving the extra access in place, but only for the letters of the ancestor that
+ * can reach the child. string based and therefore best effort (bind mounts,
+ * hardlinks), not a security boundary.
  */
 static int
-conflicts(const struct entry *self, const char *path, unsigned perms)
+conflicts(const struct entry *self, const char *path, unsigned perms, mode_t mode)
 {
 	size_t i;
 
 	for (i = 0; i < n; i++) {
 		if (&tab[i] == self)
 			continue;
-		if (is_ancestor(tab[i].path, path) && (tab[i].perms & ~perms))
+		if (is_ancestor(tab[i].path, path) && (tab[i].perms & ~perms & reach(mode)))
 			return 1;
-		if (is_ancestor(path, tab[i].path) && (perms & ~tab[i].perms))
+		if (is_ancestor(path, tab[i].path) && (perms & ~tab[i].perms & reach(tab[i].mode)))
 			return 1;
 	}
 	return 0;
@@ -245,7 +264,7 @@ add(const char *path, unsigned perms, int a)
 	for (i = 0; i < n; i++)
 		if (tab[i].dev == st.st_dev && tab[i].ino == st.st_ino)
 			e = &tab[i];
-	if (conflicts(e, canon, perms)) {
+	if (conflicts(e, canon, perms, st.st_mode)) {
 		free(canon);
 		errno = ENOTSUP;
 		goto fail;
@@ -265,6 +284,7 @@ add(const char *path, unsigned perms, int a)
 	tab[n].perms = perms;
 	tab[n].dev = st.st_dev;
 	tab[n].ino = st.st_ino;
+	tab[n].mode = st.st_mode;
 	tab[n].path = canon;
 	n++;
 	return 0;
