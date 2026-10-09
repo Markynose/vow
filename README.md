@@ -47,7 +47,13 @@ link `build/libvow.a` and `-pthread`. use musl and `-static`.
 
 ## examples
 
-small programs in `examples/`, built with `make examples`:
+small programs in `examples/`, built with `make examples` from the repo root (output in `build/`). by hand, also from the root:
+
+```sh
+cc -std=c99 -D_GNU_SOURCE -Iinclude -static -o cli examples/cli.c build/libvow.a -pthread
+```
+
+the programs:
 
 - `cli`: a cat that can only read the files named on its command line
 - `fileproc`: read one file, write an upper cased copy into one directory
