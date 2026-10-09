@@ -52,6 +52,13 @@ test: $(TESTS) $(HELPERS)
 	@mkdir -p $(B)/tmp
 	@for t in $(TESTS); do TMPDIR=$(CURDIR)/$(B)/tmp ./$$t || exit 1; done
 
+EXAMPLES = $(B)/cli $(B)/fileproc $(B)/netclient $(B)/progressive
+
+$(B)/%: examples/%.c $(B)/libvow.a
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) $(INC) -static -o $@ $< $(B)/libvow.a -pthread
+
+examples: $(EXAMPLES)
+
 check-header:
 	@for s in c89 c99 c11 c17 c2x; do \
 	    echo "header $$s"; \
@@ -69,4 +76,4 @@ static-check: $(TESTS)
 clean:
 	rm -rf $(B)
 
-.PHONY: all test check-header static-check clean
+.PHONY: all examples test check-header static-check clean

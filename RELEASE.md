@@ -22,7 +22,7 @@ abi 3 to 5 and 6 to 8 are simulated only so far (vow_test_abi_cap), no real kern
 
 ## documents
 - [ ] DESIGN.md and ROADMAP.md agree with the source (section numbers, test counts, decisions)
-- [ ] README.md written (not yet) and examples/ (cli, fileproc, netclient, progressive; not yet)
+- [x] README.md written; examples/ (cli, fileproc, netclient, progressive) built and run by hand once. no automated test runs them yet
 - [ ] every limitation in DESIGN.md section 6 and 14 is in the user documentation
 
 ## known limits that ship with v0.1 (do not hide)

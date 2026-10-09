@@ -37,12 +37,22 @@ if (pledge("stdio rpath wpath cpath", NULL) < 0)
 ```sh
 make                 # build/libvow.a
 make test            # unveil, filter, fuzz and seccomp tests (needs landlock and seccomp)
+make examples        # the programs in examples/, static, into build/
 make check-header    # c89 to c2x and c++
 make static-check
 python3 tests/mutate.py   # mutation check, every mutant must be caught
 ```
 
 link `build/libvow.a` and `-pthread`. use musl and `-static`.
+
+## examples
+
+small programs in `examples/`, built with `make examples`:
+
+- `cli`: a cat that can only read the files named on its command line
+- `fileproc`: read one file, write an upper cased copy into one directory
+- `netclient`: send a line to an ipv4 address and port (no name lookup, that needs files)
+- `progressive`: drop `rpath` after loading a config, then get killed on purpose by opening a file
 
 ## limits
 
@@ -61,4 +71,5 @@ read DESIGN.md sections 6, 12 and 14 for the full list. the main ones:
 - ROADMAP.md: stages
 - RELEASE.md: v0.1 checklist
 - include/vow.h, src/: the library
+- examples/: the programs above
 - tests/: tests, independent oracle, bpf interpreter, fuzzer, mutation script
