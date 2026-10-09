@@ -7,7 +7,8 @@ INC      = -Iinclude
 B        = build
 OBJ      = $(B)/unveil.o $(B)/pledge.o $(B)/filter.o $(B)/fork.o $(B)/scope.o
 TESTS    = $(B)/unveil_test $(B)/filter_test $(B)/fuzz_test $(B)/seccomp_test
-HELPERS  = $(B)/hlp_static $(B)/hlp_dyn
+HELPERS  = $(B)/hlp_static $(B)/hlp_dyn $(B)/hlp_dynld $(B)/hlp_so $(B)/libx.so $(B)/hlp_bad1 $(B)/hlp_bad2 $(B)/hlp_bad3 $(B)/hlp_bad4 $(B)/hlp_bad5
+TOOLS    = $(B)/vow-run
 EXAMPLES = $(B)/cli $(B)/fileproc $(B)/netclient $(B)/progressive
 
 all: $(B)/libvow.a
@@ -49,10 +50,49 @@ $(B)/hlp_dyn: tests/helper.c
 	@mkdir -p $(B)
 	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c
 
-test: $(TESTS) $(HELPERS) $(EXAMPLES)
+# dynamic fixtures for the vow-run tests: a copy of the loader that a program names as its interpreter, a
+# program with a library besides libc, and programs whose interpreter must be refused
+$(B)/ldcopy.so: $(B)/hlp_dyn
+	cp -L "$$(readelf -l $(B)/hlp_dyn | sed -n 's/.*interpreter: \(.*\)\]/\1/p')" $@
+
+$(B)/hlp_dynld: tests/helper.c $(B)/ldcopy.so
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c -Wl,--dynamic-linker=$(CURDIR)/$(B)/ldcopy.so
+
+$(B)/libx.so: tests/libx.c
+	$(CC) $(CFLAGS) $(WARN) -shared -fPIC -o $@ tests/libx.c
+
+$(B)/hlp_so: tests/hlp_so.c $(B)/libx.so
+	$(CC) $(CFLAGS) $(WARN) -o $@ tests/hlp_so.c -L$(B) -lx -Wl,-rpath,'$$ORIGIN'
+
+$(B)/hlp_bad1: tests/helper.c
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c -Wl,--dynamic-linker=/etc/passwd
+
+$(B)/hlp_bad2: tests/helper.c
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c -Wl,--dynamic-linker=ld.so
+
+$(B)/hlp_bad3: tests/helper.c
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c -Wl,--dynamic-linker=/nonexistent/ld.so
+
+$(B)/interp.sh:
+	@mkdir -p $(B)
+	printf '#!/bin/sh\nexit 0\n' > $@ && chmod 755 $@
+
+$(B)/hlp_bad5: tests/helper.c $(B)/interp.sh
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c -Wl,--dynamic-linker=$(CURDIR)/$(B)/interp.sh
+
+$(B)/hlp_bad4: tests/helper.c $(B)/hlp_dyn
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c -Wl,--dynamic-linker=$(CURDIR)/$(B)/hlp_dyn
+
+test: $(TESTS) $(HELPERS) $(EXAMPLES) $(TOOLS)
 	@mkdir -p $(B)/tmp
 	@for t in $(TESTS); do TMPDIR=$(CURDIR)/$(B)/tmp ./$$t || exit 1; done
 	@sh tests/examples.sh
+	@sh tests/vow_run.sh
+
+$(B)/vow-run: tools/vow-run/vow-run.c $(B)/libvow.a src/filter.h src/sys.h tools/vow-run/sysnames.h
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) $(INC) -Isrc -Itools/vow-run -static -o $@ tools/vow-run/vow-run.c $(B)/libvow.a -pthread
+
+tools: $(TOOLS)
 
 $(B)/%: examples/%.c $(B)/libvow.a
 	$(CC) $(CFLAGS) $(WARN) $(DEFS) $(INC) -static -o $@ $< $(B)/libvow.a -pthread
@@ -67,8 +107,8 @@ check-header:
 	@if command -v g++ >/dev/null; then echo "header c++"; \
 	    g++ -x c++ -std=c++11 -pedantic -Wall -Wextra -Werror -Iinclude -fsyntax-only tests/hdr.c || exit 1; fi
 
-static-check: $(TESTS)
-	@for t in $(TESTS); do \
+static-check: $(TESTS) $(TOOLS)
+	@for t in $(TESTS) $(TOOLS); do \
 	    if readelf -d $$t 2>/dev/null | grep -q NEEDED; then echo "$$t is dynamic"; exit 1; fi; \
 	    echo "$$t: static"; \
 	done
@@ -76,4 +116,4 @@ static-check: $(TESTS)
 clean:
 	rm -rf $(B)
 
-.PHONY: all examples test check-header static-check clean
+.PHONY: all tools examples test check-header static-check clean

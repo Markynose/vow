@@ -60,6 +60,16 @@ the programs:
 - `netclient`: send a line to an ipv4 address and port (no name lookup, that needs files)
 - `progressive`: drop `rpath` after loading a config, then get killed on purpose by opening a file
 
+## vow-run
+
+`build/vow-run` (`make tools`) sandboxes a static or dynamic program without changing it:
+
+```sh
+vow-run -p "stdio rpath exec" -u /srv/data:r ./prog args...
+```
+
+`-p` is the pledge string and must contain `exec`; `-u path:perms` is an unveil rule (the program itself is unveiled `rx` for you); `-i` clears the environment; `-v` stays as the parent and says which syscall killed the program. the loader of a dynamic program is unveiled for you; its shared libraries are not, list them with `-u` (and add `rpath`). scripts are refused for now. see `tools/vow-run/DESIGN.md`.
+
 ## limits
 
 read DESIGN.md sections 6, 12 and 14 for the full list. the main ones:
