@@ -8,6 +8,12 @@ at least one test to fail. the file is restored afterwards (also on errors).
 
 a mutant that does not compile is reported as BUILD FAILED and is not a result. NOT CAUGHT is a hole
 in the tests (or an equivalent mutant: a change that does not change behavior, listed in a comment).
+
+nothing of a mutant survives the run: the source is put back after every mutant, and when the script ends
+(also on an error or a signal) build/ is removed, so no mutant executable can be mistaken for a good one.
+rebuild with make afterwards. if the script is killed without a chance to clean up (SIGKILL), .mutate/ keeps
+the original of the file that was changed; the next start restores it, and `python3 tests/mutate.py --restore`
+does only that. `make test` refuses to run while .mutate/ exists.
 """
 import os, subprocess, sys
 
@@ -59,7 +65,7 @@ M = [
  ("vow-run: exec not required in the promises", "../tools/vow-run/vow-run.c", "if ((promise_set(promises) & P_EXEC) == 0)", "if (0)"),
  ("vow-run: a failed -u rule ignored", "../tools/vow-run/vow-run.c", "if (unveil(rules[i].path, rules[i].perms) < 0)", "if (0)"),
  ("vow-run: a failed pledge ignored", "../tools/vow-run/vow-run.c", "if (pledge(promises, NULL) < 0)", "if (pledge(promises, NULL) < 0 && 0)"),
- ("vow-run: dynamic programs accepted", "../tools/vow-run/vow-run.c", "if (ph.p_type == PT_INTERP)", "if (0)"),
+ ("vow-run: the interpreter of a dynamic program is never read", "../tools/vow-run/vow-run.c", "if (ph.p_type != PT_INTERP)\n\t\t\tcontinue;", "if (1)\n\t\t\tcontinue;"),
  ("vow-run: program not executable under the rule", "../tools/vow-run/vow-run.c", "unveil(prog, \"rx\")", "unveil(prog, \"r\")"),
  ("vow-run: -i ignored", "../tools/vow-run/vow-run.c", "envp = clear ? empty : environ;", "envp = ((void)empty, (void)clear, environ);"),
  ("vow-run: -v loses the signal in the status", "../tools/vow-run/vow-run.c", "return 128 + WTERMSIG(st);", "return WTERMSIG(st);"),
@@ -70,6 +76,25 @@ M = [
  ("vow-run: a relative interpreter accepted", "../tools/vow-run/vow-run.c", "if (name[0] != '/')", "if (0 && name[0] != '/')"),
  ("vow-run: an interpreter that is not an executable file accepted", "../tools/vow-run/vow-run.c", "if (stat(real, &st) < 0 || !S_ISREG(st.st_mode) || access(real, X_OK) != 0)", "if ((stat(real, &st) < 0 || !S_ISREG(st.st_mode) || access(real, X_OK) != 0) && 0)"),
  ("vow-run: an interpreter with an interpreter accepted", "../tools/vow-run/vow-run.c", "if (again != NULL)\n\t\tdie(EXIT_NOEXEC, \"%s: the interpreter %s has", "if (again != NULL && 0)\n\t\tdie(EXIT_NOEXEC, \"%s: the interpreter %s has"),
+ ('profile: a second pledge accepted', '../tools/vow-run/profile.c', 'if (p->promises != NULL)\n\t\treturn fail(c, "a second pledge line");', 'if (0 && p->promises != NULL)\n\t\treturn fail(c, "a second pledge line");'),
+ ('profile: an unknown directive accepted', '../tools/vow-run/profile.c', 'if (strcmp(name, "pledge") != 0 && strcmp(name, "unveil") != 0)', 'if (0)'),
+ ('profile: x without r accepted', '../tools/vow-run/profile.c', 'if ((seen & 4u) && !(seen & 1u))', 'if (0 && (seen & 4u) && !(seen & 1u))'),
+ ('profile: a relative path accepted', '../tools/vow-run/profile.c', "if (value[0] != '/')", "if (0 && value[0] != '/')"),
+ ('profile: .. in a path accepted', '../tools/vow-run/profile.c', "if ((cl == 1 && q[0] == '.') || (cl == 2 && q[0] == '.' && q[1] == '.'))", 'if (0)'),
+ ('profile: the same path twice accepted', '../tools/vow-run/profile.c', 'if (strcmp(p->rules[i].path, path) == 0)\n\t\t\treturn fail(c, "unveil: %s again', 'if (0 && strcmp(p->rules[i].path, path) == 0)\n\t\t\treturn fail(c, "unveil: %s again'),
+ ('profile: control characters accepted', '../tools/vow-run/profile.c', 'if (has_control(line))', 'if (has_control(line) && 0)'),
+ ('profile: a fifo accepted', '../tools/vow-run/profile.c', 'if (!S_ISREG(st.st_mode))', 'if (0 && !S_ISREG(st.st_mode))'),
+ ('profile: no limit on the line length', '../tools/vow-run/profile.c', 'if (len > MAX_LINE)', 'if (len > MAX_LINE * 100)'),
+ ('profile: NUL bytes accepted', '../tools/vow-run/profile.c', "if (memchr(buf, '\\0', len) != NULL)", "if (0 && memchr(buf, '\\0', len) != NULL)"),
+ ('profile: a promise twice accepted', '../tools/vow-run/profile.c', 'if (seen & bit)\n\t\t\treturn fail(c, "pledge: %.*s twice"', 'if (0 && (seen & bit))\n\t\t\treturn fail(c, "pledge: %.*s twice"'),
+ ('vow-run: --profile mixed with -p accepted', '../tools/vow-run/vow-run.c', 'if (from_flags)\n\t\t\tdie(EXIT_SETUP, "--profile cannot be combined', 'if (0 && from_flags)\n\t\t\tdie(EXIT_SETUP, "--profile cannot be combined'),
+ ('vow-run: the rules of the profile dropped', '../tools/vow-run/vow-run.c', 'nrules = prof.nrules;', 'nrules = 0;'),
+ ('unveil: the narrowing check ignores the type of the object', 'unveil.c', 'if (S_ISREG(mode))\n\t\treturn P_R | P_W | P_X | P_C;', 'if (0)\n\t\treturn P_R | P_W | P_X | P_C;'),
+ ('unveil: the narrowing check looks only at the rule above', 'unveil.c', '(perms & ~tab[i].perms & reach(tab[i].mode))', '0'),
+ ('unveil: no narrowing check', 'unveil.c', 'if (conflicts(e, canon, perms, st.st_mode)) {', 'if (0 && conflicts(e, canon, perms, st.st_mode)) {'),
+ ('unveil: a socket node is treated like a directory', 'unveil.c', 'if (S_ISSOCK(mode))\n\t\treturn P_S | P_C;', 'if (0)\n\t\treturn P_S | P_C;'),
+ ('unveil: c above a regular file is ignored', 'unveil.c', 'return P_R | P_W | P_X | P_C;\n\tif (S_ISSOCK', 'return P_R | P_W | P_X;\n\tif (S_ISSOCK'),
+ ('unveil: the type of an earlier rule is forgotten', 'unveil.c', '\ttab[n].mode = st.st_mode;\n', ''),
 ]
 
 def sh(cmd, t):
@@ -79,7 +104,40 @@ def sh(cmd, t):
     except subprocess.TimeoutExpired as e:
         return 124, "timeout"
 
+import atexit, shutil, signal
+
+STATE = os.path.join(root, ".mutate")
+
+
+def restore_stale():
+    stamp = os.path.join(STATE, "stamp")
+    if not os.path.exists(stamp):
+        shutil.rmtree(STATE, ignore_errors=True)	# interrupted before the source was touched
+        return False
+    target = open(stamp).read().strip()
+    shutil.copyfile(os.path.join(STATE, "orig"), target)
+    shutil.rmtree(STATE)
+    print("restored %s from an interrupted run" % target, flush=True)
+    return True
+
+
+def finish():
+    restore_stale()
+    sh("make clean >/dev/null 2>&1", 60)
+
+
+def on_signal(signum, frame):
+    raise SystemExit(128 + signum)
+
+
+if "--restore" in sys.argv:
+    restore_stale()
+    sys.exit(0)
+restore_stale()
 only = sys.argv[1:]
+for sg in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(sg, on_signal)
+atexit.register(finish)
 os.makedirs(os.path.join(root, "build", "tmp"), exist_ok=True)
 for i, (label, f, old, new) in enumerate(M):
     if only and str(i) not in only:
@@ -89,6 +147,9 @@ for i, (label, f, old, new) in enumerate(M):
     if old not in orig:
         print("[%d] %s: PATTERN MISSING" % (i, label), flush=True)
         continue
+    os.makedirs(STATE, exist_ok=True)
+    open(os.path.join(STATE, "orig"), "w").write(orig)
+    open(os.path.join(STATE, "stamp"), "w").write(p + "\n")
     open(p, "w").write(orig.replace(old, new, 1))
     try:
         if f.startswith("../tools/"):
@@ -119,4 +180,5 @@ for i, (label, f, old, new) in enumerate(M):
             print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
     finally:
         open(p, "w").write(orig)
+        shutil.rmtree(STATE, ignore_errors=True)
 print("done", flush=True)

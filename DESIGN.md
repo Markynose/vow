@@ -319,7 +319,16 @@ the commit enters a landlock domain on the calling thread only, and only if the 
 
 #### the narrowing conflict
 
-openbsd lets a more specific rule reduce what a parent granted. landlock only adds rights down a tree; there is no deny rule. when adding a rule whose resolved path lies below an existing entry (or above one) and the ancestor has a permission letter the descendant lacks, the call fails with `ENOTSUP`. work around it by unveiling siblings instead of the parent. the ancestor test compares canonical path strings at component boundaries; bind mounts and hardlinks can defeat it, so it is a guard against honest mistakes, not a security boundary.
+openbsd lets a more specific rule reduce what a parent granted. landlock only adds rights down a tree; there is no deny rule. so when a rule below another asks for less than the one above gives, the extra access would stay, and the call fails with `ENOTSUP` instead of leaving it. work around it by unveiling siblings instead of the parent. the ancestor test compares canonical path strings at component boundaries; bind mounts and hardlinks can defeat it, so it is a guard against honest mistakes, not a security boundary.
+
+which letters count depends on what the object below is. measured on a real kernel (abi 10) for every pair of permission sets, with the outer rule on a directory and the inner rule on a directory, a regular file or a unix socket node (`t_conflict_matches_kernel`, 667 pairs, probing read, list, write, truncate, execute, create, mkdir, unlink and connect):
+
+- 489 pairs leave extra access on the inner object and are refused. 178 do not and are accepted; every accepted pair is enforced exactly as asked.
+- for a directory below, every letter of the rule above matters (`r w x c s`): no refused pair was harmless.
+- for a regular file below, `s` does not matter (it is about connecting to a socket), so `rs` on the directory and `r` on a file in it is accepted. `c` does matter: the rule above lets the file be unlinked or renamed.
+- for a socket node below, only `s` and `c` matter: nothing can read, write or execute a socket node, so `r`, `w` and `x` above it are accepted.
+- v0.1.0 compared letters only and refused the last two kinds for nothing (27 of the 667 pairs). after the release the library reads the type of the inode it already pins. other types (fifos, devices) still use all letters, which is the safe side; they were not measured.
+- the check has the same answer whichever of the two rules comes first (tested in both orders).
 
 #### minimum abi
 
@@ -565,6 +574,8 @@ each test runs in a forked child, because restrictions are irreversible, with a 
 not done yet: glibc (deferred past v0.1, section 14), runs on other kernels, a build matrix.
 
 ## 11. repository and milestones
+
+(v0.2: `tools/vow-run/` holds the command line tool and its profile format; its design is in `tools/vow-run/DESIGN.md`. the library does not depend on it.)
 
 ```
 vow/

@@ -1,6 +1,6 @@
 # vow-run design
 
-status: approved and implemented for static and dynamic executables (`vow-run.c`, sections 11 and 12). the findings were measured on linux 7.2.9, musl, x86-64 (landlock abi 10), with the scratch programs described in each section; nothing here was run on another kernel or on glibc.
+status: approved and implemented for static and dynamic executables (sections 11 and 12) and for profiles (section 13). the findings were measured on linux 7.2.9, musl, x86-64 (landlock abi 10), with the scratch programs described in each section; nothing here was run on another kernel or on glibc.
 
 vow-run applies unveil and pledge to a process and then executes a program in it, so a program whose source is not changed can be sandboxed. it lives in `tools/vow-run/`, is c99, builds static on musl, and links `libvow.a`. libvow does not know about it and its public api (`pledge`, `unveil`) does not change.
 
@@ -8,10 +8,12 @@ vow-run applies unveil and pledge to a process and then executes a program in it
 
 ```
 vow-run -p promises [-u path:perms]... [-i] [-v] [--] program [args...]
+vow-run --profile file.vow [-i] [-v] [--] program [args...]
 ```
 
 - `-p promises`: required. the pledge string, passed to `pledge(promises, NULL)` as it is. it must contain `exec` (section 2).
-- `-u path:perms`: repeatable. one `unveil(path, perms)`. the split is at the last colon, so a path may contain colons; permissions are the letters of `unveil` (`r w x c s`). no profile or config file in this version.
+- `-u path:perms`: repeatable. one `unveil(path, perms)`. the split is at the last colon, so a path may contain colons; permissions are the letters of `unveil` (`r w x c s`). rules from a file are the `--profile` option below.
+- `--profile file.vow`: take the promises and the unveil rules from a profile (section 13) instead of `-p` and `-u`. it cannot be combined with them (125); `-i` and `-v` can.
 - `-i`: start the program with an empty environment. without it the environment is passed unchanged.
 - `-v`: report which syscall killed the program (section 8). off by default.
 - `--` ends the options. there is no option after the program name.
@@ -135,7 +137,7 @@ does it weaken the sandbox? the tracer is the parent, outside the domain, and th
 
 ## 9. what this version does not do
 
-profiles or config files, `wren` integration, new promises, kernel work, `execpromises`, scripts, finding the shared libraries of a program by itself (`-u` lists them), keeping descriptors, environment filtering, other architectures, glibc.
+`wren` integration, new promises, kernel work, `execpromises`, scripts, finding the shared libraries of a program by itself (`-u` lists them), keeping descriptors, environment filtering, other architectures, glibc.
 
 ## 10. decisions to confirm before the code
 
@@ -173,3 +175,34 @@ the new thing a dynamic program brings is a path that is chosen by the program f
 what the program can still do with the interpreter rule: it can read and execute that one file, which is a loader the user chose to run by running the program. a program file cannot name anything else (the checks above), but it can name any loader on the machine that the user can read, for example a static executable with no interpreter. that is the remaining exposure of this design; closing it would need the user to name the interpreter (an option for it, not built).
 
 not tested: an elf with more than one `PT_INTERP`, an interpreter name without its terminating zero or with a huge size (the code refuses them, with no crafted file to prove it); the `-v` report for a violation in the loader before `main`; glibc programs; `LD_*` handling.
+
+## 13. profiles
+
+`vow-run --profile editor.vow -- ./program` reads the promises and the rules from a small file, so a sandbox can be kept, reviewed and reused. the parser is `tools/vow-run/profile.c`; libvow does not know profiles exist and reads no files.
+
+```
+# a comment, on a line of its own
+pledge = stdio rpath wpath cpath exec
+unveil = /home/mark/docs:rwc
+unveil = /path with spaces/notes:r
+```
+
+rules of the format, all enforced by the parser:
+
+- a profile has exactly one `pledge` line and any number of `unveil` lines, up to 64. nothing else: no includes, variables, inheritance or sections; any other directive is an error. directive names are lower case.
+- a line is `name = value`. spaces around the `=` and at both ends of the line are ignored; the value runs to the end of the line, so a path may contain spaces and `#` and `=`. a tab or any other control character (CR included, so CRLF files are refused) anywhere in a line that is not a comment is an error, and so is a byte 0 anywhere in the file. a comment is a line whose first non-space character is `#`; there are no comments after a value. blank lines are skipped. a path cannot start or end with a space.
+- limits: a line of 4096 bytes at most, a file of 64 KiB at most, a regular file only (a fifo, a device or a directory is refused without being read; the open is non-blocking so that a fifo cannot hold vow-run).
+- `pledge`: words separated by exactly one space. every word must be a promise that exists in this version (`stdio rpath wpath cpath inet exec`), none twice, and `exec` must be among them (section 2). a promise that is only planned (`dns`, `proc`) is an error here, not a later failure of `pledge()`.
+- `unveil`: `path:permissions`, split at the last colon, so a path may contain colons. the path is absolute, in textual canonical form (no `//`, no `.` or `..` component, no trailing slash except `/` itself). permissions are a non-empty set of `r w x c s`, each at most once, and `x` needs `r` (as in the library). the same spelling twice is an error. the parser never looks at the file system and never resolves a symlink: the path is handed to `unveil` exactly as written, and `unveil` follows symlinks and pins the inode they lead to (a rule on a link is a rule on its target; checked by a test, and by `strace` showing that an invalid profile makes no call on its paths). a `..` after a symlink is refused for its spelling, not resolved. two spellings of one inode are not seen by the parser: the later line replaces the earlier, as repeated `unveil` calls do.
+- rules below one another: the parser does not judge them. whether a rule below another asks for less than it gets depends on what the paths are (a socket, a file, a directory), which only the file system knows, and the library check is type-aware (DESIGN.md section 2.6, measured against the kernel). a profile with such a pair stops at the `unveil` call with `file:line: cannot unveil path: Operation not supported (it asks for less than a rule above or below it gives)`, before the sandbox is committed and before the program starts. an earlier version of the parser compared letters alone and would have refused pairs the kernel handles correctly.
+- errors are one line, `vow-run: file:line: what`, status 125. a path that does not exist, or a pair of rules the narrowing check refuses, is not a profile error but an `unveil` failure, reported with the same line: `file:line: cannot unveil path: reason`.
+
+validation order: the whole profile is read and checked before vow-run resolves the program, closes descriptors or calls `unveil`, so a mistake on line 30 is found before line 2 has been tried, and a profile is never half applied. checking the real file system (does the path exist, is it a directory) is left to the `unveil` calls, which also run before anything is committed and before the program starts; a failure there changes nothing but vow-run itself.
+
+what the profile cannot say: the program (the command line names it), the environment (`-i`), the interpreter and the libraries of a dynamic program beyond what `unveil` lines list (the interpreter is still added by vow-run, section 12), anything about descriptors. `--profile` with `-p` or `-u` is an error rather than a merge, because a merge needs rules for which one wins; this can be lifted later.
+
+tests: about 125 checks in `tests/vow_run.sh` (valid forms, every error above, the cross-checks with `-p`/`-u`, order of validation, hostile files: NUL, control characters, long lines, a 70 KB file, 65 rules, a fifo, a directory, symlinks, rules that conflict, and files that change or lie about their size while they are read), `tests/profile_fuzz.py` (random and mangled profiles against an independent python implementation of this section; six seeds of 2000 profiles agreed, and `make test` runs a short one), and the mutants listed for `profile.c`, `vow-run.c` and the narrowing check in `tests/mutate.py`, all caught. one deliberate overlap: the check for `exec` exists in the parser and in `main`; removing either alone is invisible from outside, so it is not a mutant.
+
+while the profile is read: the file is opened once, its type checked, and read once into memory up to 64 KiB; everything after works on that copy and the rules that are applied are copies too, so a file that is truncated, rewritten or swapped later changes nothing and a torn read is just a different byte string. what was tested: a regular file that reports size 0 and holds 100 KB (`/proc/self/cmdline`) is cut at the limit; the same file with NUL bytes is refused; a writer that rewrites the profile in place (truncate then write, with empty, half-written and alternative contents) while 250 runs read it produced only runs and clean errors, never a crash, a hang or a signal. what is not claimed: that a run during a rewrite sees one of the complete versions. it can see a prefix. a prefix of a profile has fewer lines, so fewer promises or rules, except in one contrived case (a path containing `:` followed by letters, cut inside the path); the profile is trusted configuration, and whoever can write it already controls the policy, so protect it like the program itself.
+
+not tested: profiles with non-UTF-8 paths beyond the fuzz bytes; paths longer than `PATH_MAX`; glibc.

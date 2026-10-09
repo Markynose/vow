@@ -68,7 +68,20 @@ the programs:
 vow-run -p "stdio rpath exec" -u /srv/data:r ./prog args...
 ```
 
-`-p` is the pledge string and must contain `exec`; `-u path:perms` is an unveil rule (the program itself is unveiled `rx` for you); `-i` clears the environment; `-v` stays as the parent and says which syscall killed the program. the loader of a dynamic program is unveiled for you; its shared libraries are not, list them with `-u` (and add `rpath`). scripts are refused for now. see `tools/vow-run/DESIGN.md`.
+or from a profile file:
+
+```sh
+vow-run --profile editor.vow -- ./prog args...
+```
+
+```
+# editor.vow
+pledge = stdio rpath wpath cpath exec
+unveil = /home/mark/docs:rwc
+unveil = /tmp:rwc
+```
+
+the profile format is strict (one `pledge`, any number of `unveil` lines, comments on their own line, absolute canonical paths, no includes or variables) and is checked completely before the sandbox is built; `--profile` cannot be combined with `-p` or `-u`. `-p` is the pledge string and must contain `exec`; `-u path:perms` is an unveil rule (the program itself is unveiled `rx` for you); `-i` clears the environment; `-v` stays as the parent and says which syscall killed the program. the loader of a dynamic program is unveiled for you; its shared libraries are not, list them with `-u` (and add `rpath`). scripts are refused for now. see `tools/vow-run/DESIGN.md`.
 
 ## limits
 

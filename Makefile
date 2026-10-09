@@ -84,13 +84,15 @@ $(B)/hlp_bad4: tests/helper.c $(B)/hlp_dyn
 	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c -Wl,--dynamic-linker=$(CURDIR)/$(B)/hlp_dyn
 
 test: $(TESTS) $(HELPERS) $(EXAMPLES) $(TOOLS)
+	@if [ -e .mutate ]; then echo 'a mutation run was interrupted: run python3 tests/mutate.py --restore, then make clean'; exit 1; fi
 	@mkdir -p $(B)/tmp
 	@for t in $(TESTS); do TMPDIR=$(CURDIR)/$(B)/tmp ./$$t || exit 1; done
 	@sh tests/examples.sh
 	@sh tests/vow_run.sh
+	@if command -v python3 >/dev/null; then python3 tests/profile_fuzz.py 1 500; else echo 'SKIP  profile fuzz (no python3)'; fi
 
-$(B)/vow-run: tools/vow-run/vow-run.c $(B)/libvow.a src/filter.h src/sys.h tools/vow-run/sysnames.h
-	$(CC) $(CFLAGS) $(WARN) $(DEFS) $(INC) -Isrc -Itools/vow-run -static -o $@ tools/vow-run/vow-run.c $(B)/libvow.a -pthread
+$(B)/vow-run: tools/vow-run/vow-run.c $(B)/libvow.a src/filter.h src/sys.h tools/vow-run/sysnames.h tools/vow-run/profile.h tools/vow-run/profile.c
+	$(CC) $(CFLAGS) $(WARN) $(DEFS) $(INC) -Isrc -Itools/vow-run -static -o $@ tools/vow-run/vow-run.c tools/vow-run/profile.c $(B)/libvow.a -pthread
 
 tools: $(TOOLS)
 

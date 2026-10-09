@@ -2,6 +2,7 @@
  * vow-run: apply unveil and pledge, then execute a program (tools/vow-run/DESIGN.md).
  *
  *   vow-run -p promises [-u path:perms]... [-i] [-v] [--] program [args...]
+ *   vow-run --profile file.vow [-i] [-v] [--] program [args...]
  *
  * static and dynamic executables (the interpreter is unveiled for you, shared libraries are not: -u). without -v the process becomes the program; with -v it
  * stays outside the sandbox as the parent and says which syscall killed the program.
@@ -9,6 +10,7 @@
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -26,12 +28,12 @@
 #include <vow.h>
 /* the policy tables are the library internals: the report asks them what the filter would do */
 #include "filter.h"
+#include "profile.h"
 
 #define EXIT_SETUP 125
 #define EXIT_NOEXEC 126
 #define EXIT_NOTFOUND 127
 #define AUDIT_ARCH_X86_64 0xc000003eu
-#define NRULES 64
 
 extern char **environ;
 
@@ -51,7 +53,8 @@ die(int code, const char *fmt, ...)
 static void
 usage(void)
 {
-	fprintf(stderr, "usage: vow-run -p promises [-u path:perms]... [-i] [-v] [--] program [args...]\n");
+	fprintf(stderr, "usage: vow-run -p promises [-u path:perms]... [-i] [-v] [--] program [args...]\n"
+	    "       vow-run --profile file.vow [-i] [-v] [--] program [args...]\n");
 	exit(EXIT_SETUP);
 }
 
@@ -179,10 +182,11 @@ close_fds(void)
 
 /* ---- the sandbox ---- */
 
-static const struct { const char *name; unsigned bit; } promise_bits[] = {
+const struct promise_bit promise_bits[] = {
 	{ "stdio", P_STDIO }, { "rpath", P_RPATH }, { "wpath", P_WPATH },
 	{ "cpath", P_CPATH }, { "inet", P_INET }, { "exec", P_EXEC },
 };
+const size_t npromise_bits = sizeof promise_bits / sizeof *promise_bits;
 
 /* the bits of the promises named in the string; unknown words are the business of pledge() */
 static unsigned
@@ -202,10 +206,7 @@ promise_set(const char *s)
 	return bits;
 }
 
-struct rule {
-	char *path;
-	char *perms;
-};
+static const char *profile_file;
 
 static void
 sandbox(const char *prog, const char *interp, const struct rule *rules, int nrules, const char *promises)
@@ -217,8 +218,15 @@ sandbox(const char *prog, const char *interp, const struct rule *rules, int nrul
 	if (interp != NULL && unveil(interp, "rx") < 0)
 		die(EXIT_SETUP, "unveil %s: %s", interp, strerror(errno));
 	for (i = 0; i < nrules; i++)
-		if (unveil(rules[i].path, rules[i].perms) < 0)
-			die(EXIT_SETUP, "unveil %s: %s", rules[i].path, strerror(errno));
+		if (unveil(rules[i].path, rules[i].perms) < 0) {
+			/* ENOTSUP here is the narrowing check of the library: a rule below another with fewer permissions */
+			int e = errno;
+			const char *why = e == ENOTSUP ? " (it asks for less than a rule above or below it gives)" : "";
+
+			if (rules[i].line > 0)
+				die(EXIT_SETUP, "%s:%d: cannot unveil %s: %s%s", profile_file, rules[i].line, rules[i].path, strerror(e), why);
+			die(EXIT_SETUP, "unveil %s: %s%s", rules[i].path, strerror(e), why);
+		}
 	if (unveil(NULL, NULL) < 0)
 		die(EXIT_SETUP, "unveil: %s", strerror(errno));
 	if (pledge(promises, NULL) < 0)
@@ -396,18 +404,28 @@ int
 main(int argc, char **argv)
 {
 	struct rule rules[NRULES];
-	int nrules = 0, clear = 0, verbose = 0, c;
+	struct profile prof;
+	char perr[512];
+	int nrules = 0, clear = 0, verbose = 0, c, from_flags = 0;
 	const char *promises = NULL;
+	static const struct option longopts[] = { { "profile", required_argument, NULL, 'P' }, { NULL, 0, NULL, 0 } };
 	char *prog, *colon, *name, *interp = NULL;
 	char *empty[] = { NULL };
 	char **envp;
 
-	while ((c = getopt(argc, argv, "+p:u:iv")) != -1) {
+	while ((c = getopt_long(argc, argv, "+p:u:iv", longopts, NULL)) != -1) {
 		switch (c) {
+		case 'P':
+			if (profile_file != NULL)
+				die(EXIT_SETUP, "--profile twice");
+			profile_file = optarg;
+			break;
 		case 'p':
 			promises = optarg;
+			from_flags = 1;
 			break;
 		case 'u':
+			from_flags = 1;
 			if (nrules == NRULES)
 				die(EXIT_SETUP, "too many -u rules");
 			colon = strrchr(optarg, ':');
@@ -428,6 +446,18 @@ main(int argc, char **argv)
 		default:
 			usage();
 		}
+	}
+	if (profile_file != NULL) {
+		if (from_flags)
+			die(EXIT_SETUP, "--profile cannot be combined with -p or -u");
+		if (optind >= argc)
+			usage();
+		/* all of it is checked here; nothing has touched the file system for the sandbox yet */
+		if (profile_load(profile_file, &prof, perr, sizeof perr) < 0)
+			die(EXIT_SETUP, "%s", perr);
+		promises = prof.promises;
+		memcpy(rules, prof.rules, sizeof(struct rule) * (size_t)prof.nrules);
+		nrules = prof.nrules;
 	}
 	if (promises == NULL || optind >= argc)
 		usage();
