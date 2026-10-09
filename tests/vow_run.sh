@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
 # tests for tools/vow-run: needs build/vow-run, build/hlp_static, build/hlp_dyn (make test builds them).
 # a signal death shows as 128 + n in $? of the shell, the same number vow-run -v exits with.
 set -u
@@ -108,7 +109,10 @@ t "-v: a program that runs" 0 "$R" -v -p "stdio rpath exec" -u /proc/self/status
 # pf writes a profile (printf escapes work in the argument), rp runs the helper under it
 pf() { printf "$1" >"$T/p.vow"; }
 rp() { want=$1; name=$2; shift 2; t "$name" "$want" "$R" --profile "$T/p.vow" -- "$@"; }
-bad() { pf "$1"; rp 125 "profile refused: $2" "$H" ok; e "  with the line" "$3"; }
+bad() {
+	pf "$1"; rp 125 "profile refused: $2" "$H" ok; e "  with the line" "$3"
+	t "check refuses it too: $2" 125 "$R" --check "$T/p.vow"; e "  with the same message" "$3"
+}
 
 mkdir "$T/sp ace" "$T/h#sh"; echo q >"$T/sp ace/f"; echo q >"$T/h#sh/f"
 pf "# a comment\n\n   # an indented one\npledge = stdio rpath exec\nunveil = $T/a:r\n\nunveil = $T/sp ace:r\nunveil = $T/h#sh:r\n"
@@ -188,6 +192,42 @@ e "  says so" "larger than"
 { printf 'pledge = stdio exec\n'; i=0; while [ $i -lt 65 ]; do printf 'unveil = /tmp/r%s:r\n' $i; i=$((i+1)); done; } >"$T/p.vow"
 rp 125 "more than 64 unveil lines" "$H" ok
 e "  says so" "more than 64"
+
+# ---- --check: the parser and nothing else ----
+pf "# valid\npledge = stdio rpath exec\nunveil = $T/a:r\n"
+t "check: a valid profile" 0 "$R" --check "$T/p.vow"
+if [ -s "$T/out" ] || [ -s "$T/err" ]; then echo "FAIL  check: says nothing when the profile is valid"; fail=1; else echo "pass  check: says nothing when the profile is valid"; fi
+pf "pledge = stdio exec\nunveil = /nowhere/at/all/$$:rw\nunveil = /also/missing:rwc\n"
+t "check: paths that do not exist are not looked at" 0 "$R" --check "$T/p.vow"
+rp 125 "  while the same profile fails when it is used" "$H" ok
+e "  at the unveil" "cannot unveil"
+mkdir "$T/n2"; echo x >"$T/n2/f"
+pf "pledge = stdio rpath exec\nunveil = $T/n2:rw\nunveil = $T/n2/f:r\n"
+t "check: a pair of rules the library refuses is not seen" 0 "$R" --check "$T/p.vow"
+rp 125 "  and is refused when the profile is used" "$H" ok
+e "  by the narrowing check" "asks for less"
+t "check: a missing profile" 125 "$R" --check "$T/nope.vow"
+t "check: a directory" 125 "$R" --check "$T"
+t "check: a fifo" 125 "$R" --check "$T/fifo"
+t "check: no file" 125 "$R" --check
+t "check: with a program" 125 "$R" --check "$T/p.vow" -- "$H" ok
+e "  says what it takes" "one profile and nothing else"
+t "check: with -p" 125 "$R" --check "$T/p.vow" -p "stdio exec"
+t "check: with -u" 125 "$R" --check "$T/p.vow" -u "$T/a:r"
+t "check: with -i" 125 "$R" --check "$T/p.vow" -i
+t "check: with -v" 125 "$R" --check "$T/p.vow" -v
+t "check: with --profile" 125 "$R" --check "$T/p.vow" --profile "$T/p.vow"
+t "check: twice" 125 "$R" --check "$T/p.vow" --check "$T/p.vow"
+t "check: --check=file" 0 "$R" --check="$T/p.vow"
+if command -v strace >/dev/null; then
+	pf "pledge = stdio exec\nunveil = $T/a:r\nunveil = $T/lnk:r\n"
+	strace -f -e trace=landlock_create_ruleset,landlock_add_rule,landlock_restrict_self,seccomp,prctl,execve,fork,vfork,clone,close_range -o "$T/strace.out" "$R" --check "$T/p.vow" >/dev/null 2>&1
+	if grep -q "landlock\|seccomp\|prctl\|close_range\|clone\|fork" "$T/strace.out"; then echo "FAIL  check: installs no restriction and starts nothing"; fail=1; else echo "pass  check: installs no restriction and starts nothing"; fi
+	strace -f -e trace=%file,%stat,%desc -o "$T/strace.out" "$R" --check "$T/p.vow" >/dev/null 2>&1
+	if grep -q "$T/a\|$T/lnk" "$T/strace.out"; then echo "FAIL  check: touches no path of the profile"; fail=1; else echo "pass  check: touches no path of the profile"; fi
+else
+	echo "SKIP  no strace for the checks that --check installs and touches nothing"
+fi
 
 # the whole profile is checked before anything is unveiled: a missing path on line 2 and a syntax error on line 3
 pf "pledge = stdio exec\nunveil = $T/does-not-exist:r\nfoo = bar\n"

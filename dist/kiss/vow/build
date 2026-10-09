@@ -1,0 +1,55 @@
+#!/bin/sh -e
+# SPDX-License-Identifier: LGPL-3.0-only
+
+# x86-64 only: the syscall numbers, the seccomp arch check and the landlock calls are written for it
+case $(${CC:-cc} -dumpmachine) in
+x86_64-*) ;;
+*) echo "vow: x86-64 only, not building for $(${CC:-cc} -dumpmachine)" >&2; exit 1 ;;
+esac
+# musl is the one target that is built and tested; anything else is unsupported, so say it
+case $(${CC:-cc} -dumpmachine) in
+*-musl*) ;;
+*) echo "vow: warning: $(${CC:-cc} -dumpmachine) is not musl; only x86-64 musl is supported and tested" >&2 ;;
+esac
+
+# the makefile links the tool static and takes CFLAGS from kiss. -Werror is the development setting; a newer
+# compiler with a new warning must not stop a package build
+make WARN='-std=c99 -Wall -Wextra -Wpedantic' all tools
+
+# a static musl binary or nothing: a dynamic vow-run would be one more thing the sandbox has to allow
+if readelf -d build/vow-run 2>/dev/null | grep -q NEEDED; then
+    echo "vow: build/vow-run is not static" >&2
+    exit 1
+fi
+
+install -Dm755 build/vow-run   "$1/usr/bin/vow-run"
+install -Dm644 build/libvow.a  "$1/usr/lib/libvow.a"
+install -Dm644 include/vow.h   "$1/usr/include/vow.h"
+
+# the license texts travel with the binaries: vow-run is GPL-3.0-only, libvow LGPL-3.0-only, the examples 0BSD,
+# and the static binaries contain musl, whose MIT notice has to go with them (see LICENSING.md)
+lic=$1/usr/share/licenses/vow
+install -Dm644 LICENSE                      "$lic/LICENSE"
+install -Dm644 LICENSES/GPL-3.0-only.txt    "$lic/GPL-3.0-only.txt"
+install -Dm644 LICENSES/LGPL-3.0-only.txt   "$lic/LGPL-3.0-only.txt"
+install -Dm644 LICENSES/0BSD.txt            "$lic/0BSD.txt"
+install -Dm644 third-party/musl/COPYRIGHT   "$lic/musl-COPYRIGHT"
+
+# the notice in third-party/musl is the one of musl 1.2.6; say so when the musl of this machine is another one
+musl=$(/lib/ld-musl-x86_64.so.1 2>&1 | sed -n 's/^Version \(.*\)$/\1/p')
+if [ "$musl" != "1.2.6" ]; then
+    echo "vow: warning: musl ${musl:-unknown} here, the bundled notice is the one of musl 1.2.6; replace third-party/musl/COPYRIGHT" >&2
+fi
+
+doc=$1/usr/share/doc/vow
+install -Dm644 README.md                "$doc/README.md"
+install -Dm644 DESIGN.md                "$doc/DESIGN.md"
+install -Dm644 ROADMAP.md               "$doc/ROADMAP.md"
+install -Dm644 LICENSING.md             "$doc/LICENSING.md"
+install -Dm644 tools/vow-run/DESIGN.md  "$doc/vow-run.md"
+install -Dm644 tools/vow-run/WREN.md    "$doc/vow-run-wren.md"
+
+# the examples are 0BSD: meant to be copied
+for f in examples/*.c; do
+    install -Dm644 "$f" "$doc/examples/${f##*/}"
+done

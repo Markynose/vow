@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: 0BSD */
 /* fileproc: copy one file to a new file in a directory, upper casing it.
  *   ./fileproc in outdir name
  * reads in, writes outdir/name, nothing else on the file system is reachable. */

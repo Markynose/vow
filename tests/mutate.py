@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-3.0-only
 """
 mutation check: apply one small wrong change to a source file, build the tests, run them, and expect
 at least one test to fail. the file is restored afterwards (also on errors).
@@ -95,6 +96,34 @@ M = [
  ('unveil: a socket node is treated like a directory', 'unveil.c', 'if (S_ISSOCK(mode))\n\t\treturn P_S | P_C;', 'if (0)\n\t\treturn P_S | P_C;'),
  ('unveil: c above a regular file is ignored', 'unveil.c', 'return P_R | P_W | P_X | P_C;\n\tif (S_ISSOCK', 'return P_R | P_W | P_X;\n\tif (S_ISSOCK'),
  ('unveil: the type of an earlier rule is forgotten', 'unveil.c', '\ttab[n].mode = st.st_mode;\n', ''),
+ ('vow-run --check: parse errors ignored', '../tools/vow-run/vow-run.c', 'if (profile_load(check_file, &prof, perr, sizeof perr) < 0)', 'if (0 && profile_load(check_file, &prof, perr, sizeof perr) < 0)'),
+ ('vow-run --check: a program after it accepted', '../tools/vow-run/vow-run.c', 'clear || verbose || optind < argc)', 'clear || verbose)'),
+ ('vow-run --check: -p and -u accepted next to it', '../tools/vow-run/vow-run.c', 'if (from_flags || profile_file != NULL || clear || verbose || optind < argc)', 'if (profile_file != NULL || clear || verbose || optind < argc)'),
+ ('vow-run --check: does not stop after the check', '../tools/vow-run/vow-run.c', 'return 0; /* --check ends here */', '/* --check ends here */'),
+ ('vow-run --check: twice accepted', '../tools/vow-run/vow-run.c', 'if (check_file != NULL)\n\t\t\t\tdie(EXIT_SETUP, "--check twice");', 'if (0)\n\t\t\t\tdie(EXIT_SETUP, "--check twice");'),
+ ('package: the header is not installed', '../dist/kiss/vow/build', 'install -Dm644 include/vow.h   "$1/usr/include/vow.h"\n', ''),
+ ('package: no architecture guard', '../dist/kiss/vow/build', '*) echo "vow: x86-64 only, not building for $(${CC:-cc} -dumpmachine)" >&2; exit 1 ;;', '*) ;;'),
+ ('package: the document of the tool is not installed', '../dist/kiss/vow/build', 'install -Dm644 tools/vow-run/DESIGN.md  "$doc/vow-run.md"\n', ''),
+ ('package: mkpkg does not compare the version with the header', '../dist/kiss/mkpkg.sh', '[ "$hdr" = "$ver" ] || die', 'true || die'),
+ ('package: mkpkg does not check the sources file', '../dist/kiss/mkpkg.sh', '[ "$src" = "vow-$ver.tar.gz" ] || die', 'true || die'),
+ ('package: the tarball takes the tests along', '../dist/kiss/mkpkg.sh', 'examples third-party |', 'examples third-party tests |'),
+ ('package: mkpkg ignores the revision it is given', '../dist/kiss/mkpkg.sh', '"$rev^{commit}"', '"HEAD^{commit}"'),
+ ('package: mkpkg does not mention uncommitted changes', '../dist/kiss/mkpkg.sh', 'if [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ]; then', 'if false; then'),
+ ('package: mkpkg only works from the checkout', '../dist/kiss/mkpkg.sh', 'root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null)', 'root=$(git rev-parse --show-toplevel 2>/dev/null)'),
+ ('package: the license texts are not installed', '../dist/kiss/vow/build', 'install -Dm644 LICENSES/GPL-3.0-only.txt    "$lic/GPL-3.0-only.txt"\n', ''),
+ ('package: a libc other than musl goes unmentioned', '../dist/kiss/vow/build', '*) echo "vow: warning: $(${CC:-cc} -dumpmachine) is not musl; only x86-64 musl is supported and tested" >&2 ;;', '*) ;;'),
+ ('license: a library file without its SPDX line', 'pledge.c', '/* SPDX-License-Identifier: LGPL-3.0-only */\n', ''),
+ ('license: a library file under the GPL', 'lock.h', '/* SPDX-License-Identifier: LGPL-3.0-only */', '/* SPDX-License-Identifier: GPL-3.0-only */'),
+ ('license: a launcher file under the LGPL', '../tools/vow-run/profile.c', '/* SPDX-License-Identifier: GPL-3.0-only */', '/* SPDX-License-Identifier: LGPL-3.0-only */'),
+ ('license: the library refers to the launcher', 'fork.c', '/* SPDX-License-Identifier: LGPL-3.0-only */\n', '/* SPDX-License-Identifier: LGPL-3.0-only */\n/* see tools/vow-run/profile.h */\n'),
+ ('license: a license text that is not the official one', '../LICENSES/LGPL-3.0-only.txt', 'GNU LESSER GENERAL PUBLIC LICENSE', 'GNU LESSER GENERAL PUBLIC LICENCE'),
+ ('license: an example under the LGPL', '../examples/cli.c', '/* SPDX-License-Identifier: 0BSD */', '/* SPDX-License-Identifier: LGPL-3.0-only */'),
+ ('license: the musl notice altered', '../third-party/musl/COPYRIGHT', 'Rich Felker', 'Rich Felkr'),
+ ('license: the 0BSD text altered', '../LICENSES/0BSD.txt', 'with or without fee', 'with fee'),
+ ('package: the musl notice is not installed', '../dist/kiss/vow/build', 'install -Dm644 third-party/musl/COPYRIGHT   "$lic/musl-COPYRIGHT"\n', ''),
+ ('package: the 0BSD text is not installed', '../dist/kiss/vow/build', 'install -Dm644 LICENSES/0BSD.txt            "$lic/0BSD.txt"\n', ''),
+ ('package: the examples are not installed', '../dist/kiss/vow/build', 'install -Dm644 "$f" "$doc/examples/${f##*/}"', ':'),
+ ('package: the tarball leaves out the third party notice', '../dist/kiss/mkpkg.sh', 'examples third-party |', 'examples |'),
 ]
 
 def sh(cmd, t):
@@ -152,6 +181,22 @@ for i, (label, f, old, new) in enumerate(M):
     open(os.path.join(STATE, "stamp"), "w").write(p + "\n")
     open(p, "w").write(orig.replace(old, new, 1))
     try:
+        if label.startswith("license:"):
+            rc, out = sh("sh tests/license.sh 2>&1 | grep -E '^FAIL'", 120)
+            fails = [l.strip() for l in out.splitlines() if l.startswith("FAIL")]
+            if fails:
+                print("[%d] %s: CAUGHT by license.sh (%d failures; first: %s)" % (i, label, len(fails), fails[0][6:70]), flush=True)
+            else:
+                print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
+            continue
+        if f.startswith("../dist/"):
+            rc, out = sh("sh tests/package.sh 2>&1 | grep -E '^FAIL'", 600)
+            fails = [l.strip() for l in out.splitlines() if l.startswith("FAIL")]
+            if fails:
+                print("[%d] %s: CAUGHT by package.sh (%d failures; first: %s)" % (i, label, len(fails), fails[0][6:70]), flush=True)
+            else:
+                print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
+            continue
         if f.startswith("../tools/"):
             rc, out = sh("make build/vow-run build/hlp_static build/hlp_dyn 2>&1 | grep -E 'error|job failed'", 300)
             if out.strip():

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-3.0-only */
 /*
  * a small program for the exec tests. built twice: static, and dynamic against the libc.
  * what it does is chosen by its first argument; the exit status says what happened.

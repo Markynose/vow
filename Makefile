@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LGPL-3.0-only
 CC      ?= cc
 AR      ?= ar
 CFLAGS  ?= -O2
@@ -89,6 +90,8 @@ test: $(TESTS) $(HELPERS) $(EXAMPLES) $(TOOLS)
 	@for t in $(TESTS); do TMPDIR=$(CURDIR)/$(B)/tmp ./$$t || exit 1; done
 	@sh tests/examples.sh
 	@sh tests/vow_run.sh
+	@sh tests/package.sh
+	@sh tests/license.sh
 	@if command -v python3 >/dev/null; then python3 tests/profile_fuzz.py 1 500; else echo 'SKIP  profile fuzz (no python3)'; fi
 
 $(B)/vow-run: tools/vow-run/vow-run.c $(B)/libvow.a src/filter.h src/sys.h tools/vow-run/sysnames.h tools/vow-run/profile.h tools/vow-run/profile.c

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: LGPL-3.0-only -->
 # vow
 
 pledge() and unveil() for linux x86-64, in c99. landlock for the filesystem and signals, seccomp classic bpf for syscalls. no dependencies, no libseccomp. built and tested static against musl. the header is c89 clean and works from c++.
@@ -7,7 +8,7 @@ int unveil(const char *path, const char *permissions);
 int pledge(const char *promises, const char *execpromises);
 ```
 
-version 0.1.0. read the limits below before trusting it. it has been run on one kernel (linux 7.2.9) only.
+version 0.2.0-dev (the last release, tagged v0.1.0, has no `vow-run`). read the limits below before trusting it.
 
 ## use
 
@@ -31,6 +32,12 @@ if (pledge("stdio rpath wpath cpath", NULL) < 0)
 
 - linux x86-64. landlock abi 3 or later for `unveil`, abi 6 or later for `pledge("stdio")` (signal scope). the signal scope is required, there is no pid fallback.
 - the unveil commit and the first `pledge("stdio")` need the process to have exactly one thread, proven from `/proc/self/task`. otherwise `EBUSY`. call them before starting threads.
+
+## platform
+
+- **supported:** x86-64 linux with musl libc, linked statically. this is the only configuration that is built and tested: one machine (kiss linux, musl, kernel 7.2.9, landlock abi 10).
+- **unsupported** (the code is not written for it and no work is planned for v0.2): other architectures (syscall numbers, the seccomp architecture check and the landlock calls are x86-64), glibc, a shared `libvow` (only `libvow.a` is built).
+- **untested, nothing claimed:** other kernel versions (the stated minimums are landlock abi 3 for `unveil` and abi 6 for `pledge("stdio")`; lower abis are simulated with a test hook, not run), containers and their default seccomp profiles, systemd services, other musl distributions, installing the kiss package on a real root and upgrading it.
 
 ## build and test
 
@@ -81,7 +88,17 @@ unveil = /home/mark/docs:rwc
 unveil = /tmp:rwc
 ```
 
+`vow-run --check editor.vow` only validates a profile (status 0, or 125 with the file and line) and installs and starts nothing; a pass does not promise that the profile can be enforced on a given machine or that the program runs under it.
+
 the profile format is strict (one `pledge`, any number of `unveil` lines, comments on their own line, absolute canonical paths, no includes or variables) and is checked completely before the sandbox is built; `--profile` cannot be combined with `-p` or `-u`. `-p` is the pledge string and must contain `exec`; `-u path:perms` is an unveil rule (the program itself is unveiled `rx` for you); `-i` clears the environment; `-v` stays as the parent and says which syscall killed the program. the loader of a dynamic program is unveiled for you; its shared libraries are not, list them with `-u` (and add `rpath`). scripts are refused for now. see `tools/vow-run/DESIGN.md`.
+
+## packages
+
+`dist/kiss/` has a recipe for kiss linux: `dist/kiss/mkpkg.sh outdir HEAD` packages one commit (never uncommitted changes), then `kiss c vow` or `nerd c vow`, then `b` and `i`. it installs `vow-run`, `libvow.a`, `vow.h`, the license texts and the documents. see `dist/kiss/README.md`.
+
+## license
+
+libvow is LGPL-3.0-only, vow-run is GPL-3.0-only, and the example programs are 0BSD; see `LICENSE`. a program that links `libvow.a` statically has to let its recipients relink it against a modified libvow when it is distributed, and a binary that is passed on carries the musl notice: `LICENSING.md` says what that means in practice, also for packagers of binaries.
 
 ## limits
 
@@ -92,13 +109,16 @@ read DESIGN.md sections 6, 12 and 14 for the full list. the main ones:
 - `wpath` and `cpath` without `unveil` are broad. descriptors opened before the sandbox keep their power.
 - `inet` cannot filter addresses or ports, `sendmsg` destinations are not filtered.
 - landlock allows at most 16 layers. `PROT_EXEC` is not w^x. `uprobe` bypasses seccomp.
-- kernel behavior was verified on linux 7.2.9 only. glibc is not supported yet.
+- see "platform" for what is supported, unsupported and untested.
 
 ## files
 
+- LICENSE, LICENSES/, LICENSING.md: which part is under which license, the texts, what they ask of you
 - DESIGN.md: how it works and why, decisions, security model
 - ROADMAP.md: stages
 - RELEASE.md: v0.1 checklist
 - include/vow.h, src/: the library
 - examples/: the programs above
+- tools/vow-run/: the launcher, its profile parser, its design (`DESIGN.md`) and the wren integration (`WREN.md`)
+- dist/kiss/: the kiss recipe
 - tests/: tests, independent oracle, bpf interpreter, fuzzer, mutation script

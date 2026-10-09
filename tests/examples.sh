@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: LGPL-3.0-only
 # run the example programs and check what they print. needs build/ examples built (make examples).
 # netclient needs python3 for a throwaway server; without it that part is skipped.
 set -u

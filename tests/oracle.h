@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-3.0-only */
 #ifndef ORACLE_H
 #define ORACLE_H
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: 0BSD */
 /* progressive: read a config file, then give up the right to read files.
  *   ./progressive config
  * promises only shrink: first stdio rpath to load the config, then stdio alone. the last step opens

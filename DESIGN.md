@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: LGPL-3.0-only -->
 # vow design
 
 status: milestones 1 to 3 are implemented and tested: `unveil()` with `s`, the seccomp generator and installer, and the promises `stdio`, `rpath`, `wpath`, `cpath`, `inet`, `exec`. signal isolation follows alternative S2 (section 2.7): `pledge` with `stdio` requires a landlock signal scope and fails otherwise; there is no pid based fallback. no further promise is planned for v0.1; the next work is a broader security review, tests across kernels and glibc compatibility (section 14).
@@ -571,11 +572,11 @@ each test runs in a forked child, because restrictions are irreversible, with a 
 - locks: raw fork keeps a lock, fork stress, fork from a secondary thread.
 - violations that must kill (`SIGSYS`): kill of parent, group, everything; foreign `tgkill`; `fork`; `mprotect`/`mmap` write+exec; a violation in a second thread; a thread that existed before the pledge; a thread created after; `socket`; `open`; `sendto` with an address; `setrlimit`; `prlimit64` of another process; `TIOCSTI`; `F_SETOWN`; an x32 number; `int 0x80`.
 
-not done yet: glibc (deferred past v0.1, section 14), runs on other kernels, a build matrix.
+not done and not planned for v0.2: glibc (unsupported, section 14), runs on other kernels (untested), a build matrix.
 
 ## 11. repository and milestones
 
-(v0.2: `tools/vow-run/` holds the command line tool and its profile format; its design is in `tools/vow-run/DESIGN.md`. the library does not depend on it.)
+(v0.2: `tools/vow-run/` holds the command line tool and its profile format; its design is in `tools/vow-run/DESIGN.md`. the library does not depend on it. `dist/kiss/` holds the kiss recipe.)
 
 ```
 vow/
@@ -680,7 +681,7 @@ milestone 3 findings (path promises), decisions taken (open to review):
 - M3-7: pledge and unveil are serialized by spin locks, fork-safe through `pthread_atfork`, and refuse reentry from a signal handler with `EDEADLK`.
 - M3-8: unveil does not compensate for descriptors that are already writable, nor for anything when no unveil rule exists; documented in section 2.5 and section 6.
 
-## 14. security review, cross-kernel and glibc work (in progress, no new promises)
+## 14. security review, cross-kernel and glibc work (glibc and other kernels: out of scope, unsupported or untested)
 
 the work after milestone 3 is a review, not new features. this section is the list and what has been found so far.
 
@@ -704,7 +705,7 @@ not found, checked: lock order cannot cycle (`unveil` takes `plock` inside `uloc
 
 ### to do
 
-- **glibc: deferred past v0.1.** not supported in v0.1; the tree has no glibc build and no glibc-only test code. a trial was run once, on the musl host, with the host compiler against the headers and libraries of the debian 12 (glibc 2.36) and debian 13 (glibc 2.41) packages in a scratch directory (static, and dynamic with the loader of the sysroot as interpreter), the whole suite compiled unchanged except for the points below. result: all of it passed in the four configurations once these were handled. the points, for whoever does the real work:
+- **glibc: unsupported, not planned for v0.2** (it was deferred past v0.1). the trial notes below are information only, nothing is claimed for glibc; the tree has no glibc build and no glibc-only test code. a trial was run once, on the musl host, with the host compiler against the headers and libraries of the debian 12 (glibc 2.36) and debian 13 (glibc 2.41) packages in a scratch directory (static, and dynamic with the loader of the sysroot as interpreter), the whole suite compiled unchanged except for the points below. result: all of it passed in the four configurations once these were handled. the points, for whoever does the real work:
   - glibc `fork()` is `clone` with the flags `SIGCHLD|CHILD_SETTID|CHILD_CLEARTID`, not the `fork` system call: the test-only rule table that lets the tests fork needs that `clone` too.
   - glibc programs read `/proc/self/exe` while they start, static ones too (`readlinkat`): a program started by `exec` under a pledge needs `rpath` in it (a static musl program needs nothing).
   - a name lookup (`getaddrinfo`) goes through nss modules loaded with `dlopen`: impossible under a pledge, and a static glibc `getaddrinfo` still needs the shared libraries at run time. numeric addresses are fine.
@@ -713,7 +714,7 @@ not found, checked: lock order cannot cycle (`unveil` takes `plock` inside `uloc
   - the claims from section 0 (`fstat` is `fstat`, `raise` is `tgkill`) were seen to hold; the signal scope no longer depends on the second.
   also needed then: a `make` target, the matrix, and the documentation of these caveats in the user documentation.
   - (older note kept for the record) no glibc was on the development machine at first; known questions at that time: does glibc `fstat` use `fstat`, does `raise` use `tgkill`, which syscalls glibc startup and `pthread_create` need beyond the `clone` flags `0x3d0f00`. all answered by the trial.
-- **other kernels (not done for v0.1).** the suite skips by landlock abi (`SKIP` is counted apart from passes) and simulates lower abis with the `vow_test_abi_cap` hook, but a hook is not a kernel. needed: runs on real kernels, at least linux 6.2 (abi 3, the minimum for `unveil`), 6.7 or 6.8 (abi 4), 6.10 (abi 5), 6.12 (abi 6, the minimum for `stdio`) and 6.15 or later (abi 7), and the first kernel with abi 8 for `TSYNC`. expected: abi 3 to 5 refuse `stdio` (`ENOSYS`, tested through the hook), abi 6 or later accepts `stdio` for a process that provably has one thread (the same on every abi, since `TSYNC` is never used). the tests that need `s` (abi 9) skip below it. a kernel without seccomp, without landlock, or with landlock disabled at boot is simulated only.
+- **other kernels (untested, not planned for v0.2).** the suite skips by landlock abi (`SKIP` is counted apart from passes) and simulates lower abis with the `vow_test_abi_cap` hook, but a hook is not a kernel. needed: runs on real kernels, at least linux 6.2 (abi 3, the minimum for `unveil`), 6.7 or 6.8 (abi 4), 6.10 (abi 5), 6.12 (abi 6, the minimum for `stdio`) and 6.15 or later (abi 7), and the first kernel with abi 8 for `TSYNC`. expected: abi 3 to 5 refuse `stdio` (`ENOSYS`, tested through the hook), abi 6 or later accepts `stdio` for a process that provably has one thread (the same on every abi, since `TSYNC` is never used). the tests that need `s` (abi 9) skip below it. a kernel without seccomp, without landlock, or with landlock disabled at boot is simulated only.
 - **tests that assume 7.2.9 behavior**: the open(2) flag semantics, the `uprobe` exemptions, the exact errno of several refusals, the 16 layer limit. each is asserted so a different kernel reports it.
 - **review items, state now**:
   - hostile symlinks, mounts and races: done, see the next subsection.

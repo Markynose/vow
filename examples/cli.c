@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: 0BSD */
 /* cli: a cat that can only read the files named on its command line.
  *   ./cli file...
  * every path is unveiled read only, the list is sealed, and only stdio and rpath stay. */

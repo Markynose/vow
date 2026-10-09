@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-3.0-only */
 /*
  * fuzz the generator: random rule tables (every condition, every argument, alternatives for the same
  * number, errno rules, big sets) are turned into bytecode; the bytecode is run on random system call

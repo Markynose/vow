@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
 #ifndef VOW_RUN_PROFILE_H
 #define VOW_RUN_PROFILE_H
 

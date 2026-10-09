@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: LGPL-3.0-only
 # run the whole suite on the running kernel and print one line per binary plus the landlock abi.
 # copy the repo (or only build/ and tests/) into each kernel under test and run this there.
 # usage: sh tests/kernel_matrix.sh

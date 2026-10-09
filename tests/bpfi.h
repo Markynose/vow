@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-3.0-only */
 #ifndef BPFI_H
 #define BPFI_H
 

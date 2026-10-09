@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """
 profile parser fuzz: random and mangled .vow profiles are run through build/vow-run and compared with an
 independent python implementation of the format (written from DESIGN.md of vow-run section 13, not from profile.c).
@@ -141,6 +142,11 @@ def main():
         except subprocess.TimeoutExpired:
             print("HANG", data); bad += 1; continue
         err = r.stderr.decode("latin1")
+        # --check must agree with the oracle exactly, whatever the file system looks like
+        c = subprocess.run([RUN, "--check", path], capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
+        if c.returncode != (125 if why is not None else 0) or (why is None and (c.stdout or c.stderr)):
+            bad += 1
+            print("CHECK DISAGREES oracle=%s status=%d stderr=%r data=%r" % (why, c.returncode, c.stderr[:200], data[:300]))
         ok = True
         if why is not None:
             invalid += 1

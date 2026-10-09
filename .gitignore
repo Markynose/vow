@@ -2,3 +2,6 @@ build/
 .ninja_deps
 .ninja_log
 .mutate/
+examples/*
+!examples/*.c
+.make-shin.*/

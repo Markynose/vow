@@ -1,8 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
 /*
  * vow-run: apply unveil and pledge, then execute a program (tools/vow-run/DESIGN.md).
  *
  *   vow-run -p promises [-u path:perms]... [-i] [-v] [--] program [args...]
  *   vow-run --profile file.vow [-i] [-v] [--] program [args...]
+ *   vow-run --check file.vow
  *
  * static and dynamic executables (the interpreter is unveiled for you, shared libraries are not: -u). without -v the process becomes the program; with -v it
  * stays outside the sandbox as the parent and says which syscall killed the program.
@@ -54,7 +56,8 @@ static void
 usage(void)
 {
 	fprintf(stderr, "usage: vow-run -p promises [-u path:perms]... [-i] [-v] [--] program [args...]\n"
-	    "       vow-run --profile file.vow [-i] [-v] [--] program [args...]\n");
+	    "       vow-run --profile file.vow [-i] [-v] [--] program [args...]\n"
+	    "       vow-run --check file.vow\n");
 	exit(EXIT_SETUP);
 }
 
@@ -408,13 +411,21 @@ main(int argc, char **argv)
 	char perr[512];
 	int nrules = 0, clear = 0, verbose = 0, c, from_flags = 0;
 	const char *promises = NULL;
-	static const struct option longopts[] = { { "profile", required_argument, NULL, 'P' }, { NULL, 0, NULL, 0 } };
+	static const struct option longopts[] = {
+		{ "profile", required_argument, NULL, 'P' }, { "check", required_argument, NULL, 'C' }, { NULL, 0, NULL, 0 }
+	};
+	const char *check_file = NULL;
 	char *prog, *colon, *name, *interp = NULL;
 	char *empty[] = { NULL };
 	char **envp;
 
 	while ((c = getopt_long(argc, argv, "+p:u:iv", longopts, NULL)) != -1) {
 		switch (c) {
+		case 'C':
+			if (check_file != NULL)
+				die(EXIT_SETUP, "--check twice");
+			check_file = optarg;
+			break;
 		case 'P':
 			if (profile_file != NULL)
 				die(EXIT_SETUP, "--profile twice");
@@ -446,6 +457,14 @@ main(int argc, char **argv)
 		default:
 			usage();
 		}
+	}
+	if (check_file != NULL) {
+		/* only the parser runs: no program is looked up, no descriptor closed, nothing unveiled or pledged */
+		if (from_flags || profile_file != NULL || clear || verbose || optind < argc)
+			die(EXIT_SETUP, "--check takes one profile and nothing else");
+		if (profile_load(check_file, &prof, perr, sizeof perr) < 0)
+			die(EXIT_SETUP, "%s", perr);
+		return 0; /* --check ends here */
 	}
 	if (profile_file != NULL) {
 		if (from_flags)

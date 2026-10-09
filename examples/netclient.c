@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: 0BSD */
 /* netclient: send one line to an ip address and port, print the answer.
  *   ./netclient 127.0.0.1 7777 hello
  * no file system is needed, so there is no unveil; no name lookup either (it would need files),

@@ -1,0 +1,29 @@
+vow is two programs under two licenses, with example programs under a third.
+
+  libvow, the library (include/, src/)          LGPL-3.0-only   LICENSES/LGPL-3.0-only.txt
+  vow-run, the launcher (tools/vow-run/)        GPL-3.0-only    LICENSES/GPL-3.0-only.txt
+  the example programs (examples/)              0BSD            LICENSES/0BSD.txt
+
+The LGPL is a set of additional permissions on top of the GPL, so both texts are
+shipped. Everything else follows the part it belongs to:
+
+  LGPL-3.0-only   Makefile, the top level documents, dist/kiss/, and tests/
+                  except the two files below
+  GPL-3.0-only    tools/vow-run/ (code and documents), tests/vow_run.sh,
+                  tests/profile_fuzz.py
+  0BSD            examples/*.c: copy them into your own programs, no conditions
+
+Every source file and document carries one SPDX-License-Identifier line with its
+license. The files that cannot (.gitignore, dist/kiss/vow/version,
+dist/kiss/vow/sources, and the checksums file written when a package is made) are
+LGPL-3.0-only. tests/license.sh checks all of this.
+
+third-party/ holds notices of code of other people that goes into the binaries, with
+their own licenses: third-party/musl/COPYRIGHT is the MIT notice of musl libc, which
+vow-run and the test programs are linked against statically.
+
+Copyright (C) 2026 mark <mark@65x64.xyz>
+
+What the licenses ask of someone who uses or distributes vow, including the
+relinking duty of a program that links libvow statically and the source that goes
+with a binary package, is in LICENSING.md.

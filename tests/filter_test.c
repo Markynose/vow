@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-3.0-only */
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/syscall.h>

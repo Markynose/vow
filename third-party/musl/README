@@ -1,0 +1,14 @@
+This directory holds the copyright and license notice of musl libc, unchanged.
+
+vow-run and the test programs are linked statically against musl, so a binary that is passed on contains
+parts of it, and the MIT license of musl asks that its copyright notice and permission notice go with
+every copy of those parts. COPYRIGHT is that notice, byte for byte, from the musl 1.2.6 release:
+
+  source   https://musl.libc.org/releases/musl-1.2.6.tar.gz
+  sha256   d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a  (the tarball)
+  file     musl-1.2.6/COPYRIGHT
+
+The kiss package installs it as /usr/share/licenses/vow/musl-COPYRIGHT. It describes musl 1.2.6, the
+version this machine builds with; dist/kiss/vow/build warns if the musl it finds is another version, and
+then this file has to be replaced by the COPYRIGHT of that release. The files in this directory are not
+covered by the licenses of vow: musl is MIT, with the notices that COPYRIGHT lists for parts of it.

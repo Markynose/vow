@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-3.0-only */
 #ifndef VOW_FILTER_H
 #define VOW_FILTER_H
 
