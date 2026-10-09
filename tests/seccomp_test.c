@@ -1376,6 +1376,46 @@ t_failed_install_keeps_nnp(void)
 	nothing_installed();
 }
 
+/*
+ * the scope outlives a failed filter install and is entered only once: a retry loop that fails many
+ * times does not stack a layer per try (a new layer each time would run into the limit of 16)
+ */
+static void
+t_scope_entered_once_over_failed_installs(void)
+{
+	int i;
+
+	for (i = 0; i < 20; i++) {
+		vow_test_seccomp_nr = 9999;
+		ERR(pledge("stdio", NULL), ENOSYS);
+		vow_test_seccomp_nr = 0;
+	}
+	nothing_installed();
+	/* the promise then takes effect: a call outside stdio kills (a child, because stdio has no fork) */
+	if (fork() == 0) {
+		OK(pledge("stdio", NULL));
+		open("/dev/null", O_RDONLY);
+		_exit(0);
+	}
+	{
+		int st;
+
+		CHECK(wait(&st) > 0 && WIFSIGNALED(st) && WTERMSIG(st) == SIGSYS);
+	}
+}
+
+/* a refused promise string changes nothing: not the state, not the filter */
+static void
+t_bad_promise_changes_nothing(void)
+{
+	ERR(pledge("stdio bogus", NULL), EINVAL);
+	ERR(pledge("stdio dns", NULL), ENOTSUP);
+	nothing_installed();
+	OK(pledge("stdio rpath", NULL));
+	ERR(pledge("stdio rpath wpath", NULL), EPERM);
+	OK(pledge("stdio rpath", NULL));
+}
+
 static volatile int tc_stage;
 static volatile long tc_tid;
 
@@ -4521,6 +4561,8 @@ static const struct test tests[] = {
 	{ "mprotect w+x with high bits", t_mprotect_wx_high_bits, SIGSYS },
 	{ "mprotect w+x with growsdown", t_mprotect_growsdown_wx, SIGSYS },
 	{ "failed install keeps no_new_privs", t_failed_install_keeps_nnp, 0 },
+	{ "scope entered once over failed installs", t_scope_entered_once_over_failed_installs, 0 },
+	{ "a refused promise string changes nothing", t_bad_promise_changes_nothing, 0 },
 	{ "tsync conflict returns a thread id", t_tsync_conflict, 0 },
 	{ "concurrent pledge calls", t_pledge_race, 0 },
 	{ "kernel: how open flags really behave", t_kernel_open_truths, 0 },
@@ -4735,7 +4777,7 @@ main(int argc, char **argv)
 			perror("mkdtemp");
 			return 1;
 		}
-		rc = t_main(tests, (int)(sizeof tests / sizeof *tests), 213);
+		rc = t_main(tests, (int)(sizeof tests / sizeof *tests), 215);
 		snprintf(cmd, sizeof cmd, "rm -rf '%s'", root);
 		if (system(cmd) != 0)
 			rc = 1;

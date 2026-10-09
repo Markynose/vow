@@ -8,6 +8,7 @@ B        = build
 OBJ      = $(B)/unveil.o $(B)/pledge.o $(B)/filter.o $(B)/fork.o $(B)/scope.o
 TESTS    = $(B)/unveil_test $(B)/filter_test $(B)/fuzz_test $(B)/seccomp_test
 HELPERS  = $(B)/hlp_static $(B)/hlp_dyn
+EXAMPLES = $(B)/cli $(B)/fileproc $(B)/netclient $(B)/progressive
 
 all: $(B)/libvow.a
 
@@ -48,11 +49,10 @@ $(B)/hlp_dyn: tests/helper.c
 	@mkdir -p $(B)
 	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ tests/helper.c
 
-test: $(TESTS) $(HELPERS)
+test: $(TESTS) $(HELPERS) $(EXAMPLES)
 	@mkdir -p $(B)/tmp
 	@for t in $(TESTS); do TMPDIR=$(CURDIR)/$(B)/tmp ./$$t || exit 1; done
-
-EXAMPLES = $(B)/cli $(B)/fileproc $(B)/netclient $(B)/progressive
+	@sh tests/examples.sh
 
 $(B)/%: examples/%.c $(B)/libvow.a
 	$(CC) $(CFLAGS) $(WARN) $(DEFS) $(INC) -static -o $@ $< $(B)/libvow.a -pthread

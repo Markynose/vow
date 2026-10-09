@@ -7,7 +7,7 @@ int unveil(const char *path, const char *permissions);
 int pledge(const char *promises, const char *execpromises);
 ```
 
-this is v0.1 work in progress, not released. read the limits below before trusting it.
+version 0.1.0. read the limits below before trusting it. it has been run on one kernel (linux 7.2.9) only.
 
 ## use
 

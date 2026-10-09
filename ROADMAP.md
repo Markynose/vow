@@ -31,7 +31,7 @@ explicitly not in v0.1: `proc`, `dns`, `unix`, `tty`, `fattr` and other promises
 
 exit criteria: every row of the "enforced" list in DESIGN.md section 6 has a passing kernel test on the primary matrix; the open items N1 to N3 in DESIGN.md section 13 are resolved; the glibc `fstat` and `tgkill` findings are confirmed by running a glibc build, not only by reading source.
 
-## review stage between v0.1 milestones and release (current)
+## review stage between v0.1 milestones and release (done for 0.1.0, with open items listed in RELEASE.md)
 
 no new promises. work, in this order (details in DESIGN.md section 14):
 

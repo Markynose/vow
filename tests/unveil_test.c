@@ -469,6 +469,19 @@ t_commit_failure_state(void)
 	CHECK(try_open(pj(D, "h"), O_RDONLY) == EACCES);
 }
 
+/* an add that fails leaves the rules added before it, and the commit enforces them */
+static void
+t_failed_add_keeps_earlier_rules(void)
+{
+	tree("fadd");
+	OK(unveil(A, "r"));
+	ERR(unveil(pj(A, "nope"), "r"), ENOENT);
+	ERR(unveil(pj(A, "f"), "q"), EINVAL);
+	OK(unveil(NULL, NULL));
+	CHECK(try_open(pj(A, "f"), O_RDONLY) == 0);
+	CHECK(try_open(pj(D, "h"), O_RDONLY) == EACCES);
+}
+
 static int rd_p[2], rs_p[2];
 
 static void *
@@ -1470,6 +1483,7 @@ static const struct test tests[] = {
 	{ "no_new_privs set", t_nnp, 0 },
 	{ "abi gate", t_abi_gate, 0 },
 	{ "failed commit state", t_commit_failure_state, 0 },
+	{ "a failed add keeps earlier rules", t_failed_add_keeps_earlier_rules, 0 },
 	{ "old abi single thread", t_old_abi_single_thread, 0 },
 	{ "commit refused with other threads", t_commit_refused_with_threads, 0 },
 	{ "commit refused keeps a stricter sibling", t_commit_refused_keeps_sibling_domain, 0 },
@@ -1525,7 +1539,7 @@ main(int argc, char **argv)
 		return 1;
 	}
 	printf("kernel landlock abi: %d\n", real_abi());
-	rc = t_main(tests, (int)(sizeof tests / sizeof *tests), 60);
+	rc = t_main(tests, (int)(sizeof tests / sizeof *tests), 61);
 	snprintf(cmd, sizeof cmd, "rm -rf '%s'", root);
 	if (system(cmd) != 0)
 		rc = 1;

@@ -526,7 +526,7 @@ only `const char *` and `int` in prototypes, no `//` comments, no declarations a
 
 each test runs in a forked child, because restrictions are irreversible, with a 60 second alarm and core dumps off. exit 0 is a pass (or, for entries that name a signal, death by that signal), exit 77 a skip. the runner counts passes, failures and skips separately and fails if the table size is not the expected number, so a dropped test is noticed. skips are never counted as passes. all test binaries are linked `-static` against musl and `make static-check` verifies it.
 
-### unveil (`tests/unveil_test.c`, 47 tests, m1 plus `s`)
+### unveil (`tests/unveil_test.c`, 61 tests)
 
 - arguments, rights (`r`, `rw`, `rwc`, `w` on a file, `r` on a file, `rx` exec of a static binary, exec without `x`, bare `x`/`wx`/`cx` refused, `c` on a file refused), lifecycle (sealed, seal-only, replace narrower and wider), conflict checks, escapes (symlink, `..`, `O_PATH` directory descriptor, `/proc/self/fd` reopen, cross-boundary rename and hardlink).
 - documented gaps asserted so a kernel change is noticed: earlier descriptors keep working; metadata calls work on hidden paths.
@@ -545,7 +545,7 @@ each test runs in a forked child, because restrictions are irreversible, with a 
 - sockets: 37620 `socket` calls over domains, types with flag bits and protocols for six promise sets, and a grid of every level and option for `setsockopt` with three spellings of each (the count of allowed pairs is asserted to be exactly 49 times 3 times 2), bytecode against oracle.
 - the path call matrix (56 calls: the read, write and create calls, 16 more that no path promise may allow, each with plain, junk and all-ones arguments) for all eight subsets; and every value of the low 17 bits of the `renameat2` and `linkat` flags, with and without junk above bit 31, for sixteen promise sets.
 
-### seccomp (`tests/seccomp_test.c`, 207 tests)
+### seccomp (`tests/seccomp_test.c`, 215 tests)
 
 - kernel differential for the `stdio` set and the empty set (section 5), including the argument-model probes.
 - argument errors with proof that nothing was installed; execpromises rules; widening refused; narrowing takes effect; an extra allow-all filter cannot widen; a failed install changes nothing; unveil locked after a pledge; filter and `no_new_privs` inherited across a real `execve`.
@@ -702,15 +702,15 @@ not found, checked: lock order cannot cycle (`unveil` takes `plock` inside `uloc
   - the claims from section 0 (`fstat` is `fstat`, `raise` is `tgkill`) were seen to hold; the signal scope no longer depends on the second.
   also needed then: a `make` target, the matrix, and the documentation of these caveats in the user documentation.
   - (older note kept for the record) no glibc was on the development machine at first; known questions at that time: does glibc `fstat` use `fstat`, does `raise` use `tgkill`, which syscalls glibc startup and `pthread_create` need beyond the `clone` flags `0x3d0f00`. all answered by the trial.
-- **other kernels.** the suite skips by landlock abi (`SKIP` is counted apart from passes) and simulates lower abis with the `vow_test_abi_cap` hook, but a hook is not a kernel. needed: runs on real kernels, at least linux 6.2 (abi 3, the minimum for `unveil`), 6.7 or 6.8 (abi 4), 6.10 (abi 5), 6.12 (abi 6, the minimum for `stdio`) and 6.15 or later (abi 7), and the first kernel with abi 8 for `TSYNC`. expected: abi 3 to 5 refuse `stdio` (`ENOSYS`, tested through the hook), abi 6 or later accepts `stdio` for a process that provably has one thread (the same on every abi, since `TSYNC` is never used). the tests that need `s` (abi 9) skip below it. a kernel without seccomp, without landlock, or with landlock disabled at boot is simulated only.
+- **other kernels (not done for v0.1).** the suite skips by landlock abi (`SKIP` is counted apart from passes) and simulates lower abis with the `vow_test_abi_cap` hook, but a hook is not a kernel. needed: runs on real kernels, at least linux 6.2 (abi 3, the minimum for `unveil`), 6.7 or 6.8 (abi 4), 6.10 (abi 5), 6.12 (abi 6, the minimum for `stdio`) and 6.15 or later (abi 7), and the first kernel with abi 8 for `TSYNC`. expected: abi 3 to 5 refuse `stdio` (`ENOSYS`, tested through the hook), abi 6 or later accepts `stdio` for a process that provably has one thread (the same on every abi, since `TSYNC` is never used). the tests that need `s` (abi 9) skip below it. a kernel without seccomp, without landlock, or with landlock disabled at boot is simulated only.
 - **tests that assume 7.2.9 behavior**: the open(2) flag semantics, the `uprobe` exemptions, the exact errno of several refusals, the 16 layer limit. each is asserted so a different kernel reports it.
 - **review items, state now**:
   - hostile symlinks, mounts and races: done, see the next subsection.
-  - the `stdio` rule table against newer syscalls: not done; needs a kernel syscall list diff, in the release checklist.
+  - the `stdio` rule table against newer syscalls: not done. v0.1 ships without that comparison.
   - fuzz of the generator against the interpreter and the kernel: done (`tests/fuzz_test.c`, six seeds clean).
   - existing seccomp filters and restricted environments: see "restricted environments" below.
 
-### hostile filesystem audit (tests in `tests/unveil_test.c`, 60 tests)
+### hostile filesystem audit (tests in `tests/unveil_test.c`, 61 tests)
 
 - the path given to `unveil` is opened once (`O_PATH`, the inode is pinned by the descriptor) and then resolved a second time to a string for the conflict check. if the two disagree (a symlink swapped between them) the call fails with `ESTALE` and records nothing. tested deterministically (hook after the open) and under a thread that swaps a link all the time (about 400 recorded and 1600 refused out of 2000 calls; every recorded rule was for one of the two targets). mutant 31 removes the check and is caught.
 - loops (`ELOOP`), a trailing slash on a file (`ENOTDIR`), names too long, missing middle components, an unreadable directory, names with blanks and newlines, `/proc/self/cwd` and device files behave as plain paths.
@@ -720,9 +720,9 @@ not found, checked: lock order cannot cycle (`unveil` takes `plock` inside `uloc
 
 ### restricted environments
 
-- the whole suite passes in a user namespace as root (`unshare -Ur`): 60, 12 and 213 tests.
+- the whole suite passes in a user namespace as root (`unshare -Ur`): 60, 12 and 213 tests (before the last two tests were added to the unveil and seccomp binaries; not rerun there).
 - with a low descriptor limit (`ulimit -n 12` or `24`) only the tests that open many descriptors on purpose fail (`many entries`, `emfile`, `allocation failure`, `concurrent unveil calls`), and the library reports `EMFILE`: every `unveil` pins one descriptor until the commit, so a program with a tight limit gets a clean error, not a partial rule set. this is a documented property, not a fixed one.
-- a filter installed before vow (container runtime, systemd): stacking works; `TSYNC` fails with `EBUSY` if sibling threads carry different filters, and pledge then reports `EBUSY` with nothing installed. a seccomp profile that blocks `landlock_*` or `seccomp` makes `unveil` or `pledge` fail with `EPERM` or `ENOSYS`; vow does not try to work around it. not run against a real container runtime here (none installed), only by simulation.
+- a filter installed before vow (container runtime, systemd): stacking works; `TSYNC` fails with `EBUSY` if sibling threads carry different filters, and pledge then reports `EBUSY` with nothing installed. a seccomp profile that blocks `landlock_*` or `seccomp` makes `unveil` or `pledge` fail with `EPERM` or `ENOSYS`; vow does not try to work around it. not run against a real container runtime or a systemd service: none was available and the maintainer chose not to. only simulated.
 
 ### failure states: what stays changed after an error
 
@@ -740,6 +740,6 @@ not found, checked: lock order cannot cycle (`unveil` takes `plock` inside `uloc
 | atfork registration | never fails visibly | the handlers stay registered for the life of the process |
 | thread-list descriptor | opened on the first call | one cached descriptor for the life of the process; `EMFILE` there is returned as `EMFILE` |
 
-the rows come from reading `unveil.c`, `scope.c` and `pledge.c`; the ones with a test are the thread-at-commit, scope-then-failure and `EMFILE` rows. the rest are not asserted by a test yet. nothing is rolled back because the kernel offers no way to. the two irreversible partial states are the unveil domain after a late thread and the scope after a failed filter; both only make the process more restricted, never less.
+the rows come from reading `unveil.c`, `scope.c` and `pledge.c`; the rows with a test: thread at commit, scope then filter failure (the scope is entered once over twenty failed installs), a failed add keeps the earlier rules, a refused promise string changes nothing, a failed commit enforces nothing, and `EMFILE`. the rest are not asserted by a test. nothing is rolled back because the kernel offers no way to. the two irreversible partial states are the unveil domain after a late thread and the scope after a failed filter; both only make the process more restricted, never less.
 
 
