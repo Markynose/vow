@@ -104,6 +104,14 @@ $(B)/%: examples/%.c $(B)/libvow.a
 
 examples: $(EXAMPLES)
 
+# install, upgrade and removal of the kiss package with nerd in an isolated root (needs nerd, git, python3; strace for the audit)
+kiss-test: all tools
+	@sh tests/kiss_install.sh
+
+# the same as root of a disposable user and mount namespace, with the real system read-only (needs user namespaces)
+kiss-test-root: all tools
+	@sh tests/kiss_install_ns.sh
+
 check-header:
 	@for s in c89 c99 c11 c17 c2x; do \
 	    echo "header $$s"; \
@@ -121,4 +129,4 @@ static-check: $(TESTS) $(TOOLS)
 clean:
 	rm -rf $(B)
 
-.PHONY: all tools examples test check-header static-check clean
+.PHONY: all tools examples test kiss-test kiss-test-root check-header static-check clean
