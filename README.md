@@ -37,7 +37,7 @@ if (pledge("stdio rpath wpath cpath", NULL) < 0)
 
 - **supported:** x86-64 linux with musl libc, linked statically. this is the only configuration that is built and tested: one machine (kiss linux, musl, kernel 7.2.9, landlock abi 10).
 - **unsupported** (the code is not written for it and no work is planned for v0.2): other architectures (syscall numbers, the seccomp architecture check and the landlock calls are x86-64), glibc, a shared `libvow` (only `libvow.a` is built).
-- **untested, nothing claimed:** other kernel versions (the stated minimums are landlock abi 3 for `unveil` and abi 6 for `pledge("stdio")`; lower abis are simulated with a test hook, not run), containers and their default seccomp profiles, systemd services, other musl distributions, installing the kiss package on a real root by root and upgrading it there (install, upgrade and removal were tested in an isolated root and as root of a disposable namespace, never on the real root: `dist/kiss/README.md`).
+- **untested, nothing claimed:** other kernel versions (the stated minimums are landlock abi 3 for `unveil` and abi 6 for `pledge("stdio")`; lower abis are simulated with a test hook, not run), containers and their default seccomp profiles, systemd services, other musl distributions, upgrading the kiss package on a real root, and installing it on any other machine (install, upgrade and removal were tested in an isolated root and as root of a disposable namespace; one install was done on a real root: `dist/kiss/README.md`).
 
 ## build and test
 
@@ -101,7 +101,7 @@ the profile format is strict (one `pledge`, any number of `unveil` lines, commen
 
 ## packages
 
-`dist/kiss/` has a recipe for kiss linux: `dist/kiss/mkpkg.sh outdir HEAD` packages one commit (never uncommitted changes), then `kiss c vow` or `nerd c vow`, then `b` and `i`. it installs `vow-run`, `libvow.a`, `vow.h`, the license texts and the documents. see `dist/kiss/README.md`. the supported workflow is **nerd, with umask 022 for both `nerd b` and `nerd i`** (a strict umask gives unreadable files and a wrong archive); the original kiss is not a supported installer for this package, because it restores the owner recorded in the archive and nerd does not. installing on the real root has not been tested.
+`dist/kiss/` has a recipe for kiss linux: `dist/kiss/mkpkg.sh outdir HEAD` packages one commit (never uncommitted changes), then `kiss c vow` or `nerd c vow`, then `b` and `i`. it installs `vow-run`, `libvow.a`, `vow.h`, the license texts and the documents. see `dist/kiss/README.md`. the supported workflow is **nerd, with umask 022 for both `nerd b` and `nerd i`** (a strict umask gives unreadable files and a wrong archive); the original kiss is not a supported installer for this package, because it restores the owner recorded in the archive and nerd does not. it was installed once on the real root of the machine of the author and verified (`dist/kiss/README.md`); an upgrade of an installed copy was not tested.
 
 ## license
 

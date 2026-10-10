@@ -62,7 +62,10 @@ nerd_env() { # run nerd as the user, in a clean environment with the package dir
 # is busybox, whose find has no -printf. an empty listing means that nothing could be compared, which is a failure, never a pass
 listing() { python3 "${LISTER:-$here/tests/tree_listing.py}" "$R"; }
 pid1() { cat /proc/1/comm 2>/dev/null; }
-pid1_start() { awk '{ sub(/^[^)]*\) /, ""); print $20 }' /proc/1/stat 2>/dev/null; }   # field 22 of stat: the start time
+pid1_start() {   # field 22 of stat: the start time of pid 1 (a scratch run can fake it, to test the check that it did not change)
+	[ $LIVE = 0 ] && [ -n "${VOW_TEST_P1START:-}" ] && { echo "$VOW_TEST_P1START"; return; }
+	awk '{ sub(/^[^)]*\) /, ""); print $20 }' /proc/1/stat 2>/dev/null
+}
 
 # ================= the facts of the revision =================
 if [ "$mode" = preflight ] || [ "$mode" = install ]; then
@@ -160,6 +163,8 @@ PY
 	listing >"$S/before.listing"
 	[ "$(wc -l <"$S/before.listing")" -gt 3 ] && grep -q ' var/db/kiss$' "$S/before.listing" || { bad "the listing of the root before the install is empty or lacks the package database: nothing could be compared"; exit 1; }
 	ok "recorded the state before: $(wc -l <"$S/before.listing") entries of /usr, /var/db/kiss and /etc/wren (sha256 $(sha256sum "$S/before.listing" | cut -c1-16))"
+	P1START=$(pid1_start)
+	[ -n "$P1START" ] && ok "pid 1 is $(pid1), started at tick $P1START: the install must not restart it" || bad "cannot read the start time of pid 1"
 	{ echo "REV=$sha"; echo "VER=$VER"; echo "REL=$REL"; echo "ROOT='$ROOT'"; echo "REPO='$REPO'"; echo "KISS_PATH_BASE='$KISS_PATH_BASE'"; echo "S='$S'"; echo "P1START=$(pid1_start)"; } >"$S/env"
 	echo
 	if [ $fail = 0 ]; then echo "PREFLIGHT: SAFE TO INSTALL ($sha, vow $VER-$REL into ${ROOT:-the real root})"; else echo "PREFLIGHT: NOT SAFE, nothing was changed"; fi
@@ -221,10 +226,8 @@ PY
 	# wren and the services: /etc/wren must be identical (a root without it has nothing to compare, and that is identical too)
 	awk '$5 ~ /^etc\/wren/' "$S/before.listing" >"$S/wren.before"; awk '$5 ~ /^etc\/wren/' "$S/after.listing" >"$S/wren.after"
 	if cmp -s "$S/wren.before" "$S/wren.after"; then ok "/etc/wren is identical: every file, link, mode, owner and size ($(wc -l <"$S/wren.after") entries)"; else bad "/etc/wren changed"; diff "$S/wren.before" "$S/wren.after" | head -4 | sed 's/^/      /'; fi
-	if [ $LIVE = 1 ]; then
-		[ "$(pid1)" = wren ] && [ "$(pid1_start)" = "$P1START" ] && ok "pid 1 is still the same wren (start time $P1START): nothing was restarted" || bad "pid 1 changed"
-		ok "the enabled services are as before: $(ls /etc/wren/services | tr '\n' ' ')"
-	fi
+	[ -n "${P1START:-}" ] && [ "$(pid1_start)" = "$P1START" ] && ok "pid 1 is still the same process (start time $P1START): nothing was restarted" || bad "pid 1 changed or its start time is unknown (was ${P1START:-unset}, is $(pid1_start))"
+	ok "the enabled services are as before: $(ls "$R/etc/wren/services" 2>/dev/null | tr '\n' ' ')"
 	# the program works
 	V=$R/usr/bin/vow-run
 	"$V" --check /dev/null >/dev/null 2>&1; [ $? = 125 ] && ok "the installed vow-run runs and refuses an empty profile with 125" || bad "the installed vow-run does not behave"

@@ -126,6 +126,14 @@ newroot r8; listing >"$T/l10"
 VOW_TEST_EXPECT_OWNER=0:0 rri install "$sha"; rc=$?
 if [ $rc != 0 ] && grep -q "owner or mode of a package path is wrong" "$T/out" && grep -q "^THE INSTALL WAS REJECTED" "$T/out"; then ok "a package file with an unexpected owner is detected and the install is rejected"; else bad "a package file with an unexpected owner is detected"; fi
 listing >"$T/l11"; cmp -s "$T/l10" "$T/l11" && ok "and undone: the root is as before" || bad "and undone: the root is as before"
+# pid 1 must be the same process after the install: here its start time is made to change after the install (a restart of the init)
+newroot r10; listing >"$T/l12"
+export VOW_TEST_AFTER_INSTALL='VOW_TEST_P1START=999999999'; rri install "$sha"; rc=$?
+if [ $rc != 0 ] && grep -q "pid 1 changed" "$T/out" && grep -q "^THE INSTALL WAS REJECTED" "$T/out"; then ok "a pid 1 that restarted during the install is detected and the install is rejected"; else bad "a pid 1 that restarted during the install is detected"; fi
+unset VOW_TEST_AFTER_INSTALL VOW_TEST_P1START
+newroot r11
+rri install "$sha"; rc=$?
+[ $rc = 0 ] && grep -q "^pass  pid 1 is still the same process" "$T/out" && ok "and with an unchanged pid 1 the same-run verification reaches its end (this path once died on an unset variable)" || { bad "the same-run verification reaches its end"; tail -5 "$T/out" | sed 's/^/    /'; }
 # a lister that finds nothing must stop the preflight: an empty listing compares nothing, and compared nothing passes everything
 newroot r9
 VOW_TEST_LISTER=/bin/true rri preflight "$sha"; rc=$?; wantfail "an empty listing of the root stops the preflight" "empty or lacks the package database"

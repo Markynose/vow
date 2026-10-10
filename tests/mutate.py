@@ -161,6 +161,7 @@ M = [
  ('real-root: an empty directory that a removal would delete is accepted', '../tests/real_root_install.sh', '[ "$(ls -A "$R/$d" 2>/dev/null | wc -l)" -gt 0 ] || bad', 'true || bad'),
  ('real-root: an already installed vow is accepted', '../tests/real_root_install.sh', '[ -f "$DB/installed/vow/version" ] && bad "vow is already installed', 'false && bad "vow is already installed'),
  ('real-root: an empty listing is accepted', '../tests/real_root_install.sh', '[ "$(wc -l <"$S/before.listing")" -gt 3 ] && grep -q', 'true || grep -q'),
+ ('real-root: a pid 1 that restarted goes unnoticed', '../tests/real_root_install.sh', '[ -n "${P1START:-}" ] && [ "$(pid1_start)" = "$P1START" ] && ok', 'true && ok'),
 ]
 
 def sh(cmd, t):
