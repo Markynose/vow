@@ -13,18 +13,18 @@ kiss c vow && kiss b vow && kiss i vow    # or nerd c, b, i
 
 - **a revision is required.** `mkpkg.sh` packages the commit you name (`HEAD`, a tag, a hash) with `git archive`, and the recipe files are read from that commit as well. uncommitted changes are never packaged; if the working tree has any, `mkpkg.sh` says so. the commit id is recorded in the tarball (`gzip -dc vow-VERSION.tar.gz | git get-tar-commit-id`).
 - it works from any directory (it finds the checkout from its own location) and uses no gnu tar option: `git archive` writes the tar, `gzip` packs it.
-- it refuses a commit whose `dist/kiss/vow/version` differs from `VOW_VERSION` in `include/vow.h`, or whose `sources` file names another tarball.
+- it refuses a commit whose `dist/kiss/vow/version` differs from `VOW_VERSION` in `include/vow.h`, or whose `sources` file names another tarball. a revision that is a release tag (`v0.2.0`) must match the version of the recipe in it, and a development version is refused from a tag. the release procedure that this serves, with no circular dependency between the commit, the tag and the archive, is in `RELEASE.md`.
 - `kiss c` writes the checksums, which are not kept in the repository.
 
 **the supported workflow, and the umask.** the supported way to build and install this package is with **nerd**, with **umask 022** in the shell that runs `nerd b` and `nerd i` (check with `umask`; 022 is the usual default). this is a requirement, not advice:
 - *installing.* the copy into the root applies the umask. under `umask 077` an install by root gives files that other users cannot read (files 700 and 600, directories 755), so `/usr/bin/vow-run` would be usable by root only. found and checked in the namespace test below; the original kiss does exactly the same, so this is how both package managers work, not a defect of nerd (nerd was not changed).
-- *building.* under `umask 077` the archive records the top-level directory `./usr` as mode 700 (observed), because the directories that the recipe creates with `install -D` follow the umask of the builder. a package built that way would create `/usr` with that mode in an empty root. the recipe sets no umask of its own, so the builder must; a `umask 022` at the top of `dist/kiss/vow/build` would remove the dependence (not done: it is a change of the recipe, left to a decision).
+- *building.* under `umask 077` the archive records the top-level directory `./usr` as mode 700 (observed), because the directories that the recipe creates with `install -D` follow the umask of the builder. a package built that way would create `/usr` with that mode in an empty root. the recipe now sets `umask 022` itself (the top of `dist/kiss/vow/build`), so the payload of the archive no longer depends on the builder: it is tested under an inherited `umask 077` (the staged tree and the archive made by nerd have the intended modes). what the recipe cannot reach is the skeleton that the package manager itself adds to the archive, the directories `.`, `var`, `var/db/kiss/...` and the `build` file in the database part: under `umask 077` those are mode 700, in nerd and in the original kiss alike (the archives of the two are identical in names and modes). so build under umask 022 all the same.
 
 **nerd and the original kiss are not interchangeable for this package.** with nerd, a root install creates root-owned files whatever owner the archive records: nerd makes no `chown` (traced, and a failing check if one appears). the original kiss restores the owner that the archive records: its `tar` was seen calling `chown(..., 1000, 1000)` for every entry when it ran as uid 1000. every archive nerd builds records the builder (uid and gid 1000), so what the original kiss leaves behind when root installs such an archive was **not observed** (the one-id namespace cannot show it) and may be files owned by uid 1000. only the nerd workflow is tested and supported; installing this package with the original kiss as root is unsupported and its ownership result is unverified.
 
 ## version
 
-the package is `0.2.0-dev 1`. the first field is the version of the library (`VOW_VERSION` in `include/vow.h`); a development version carries `-dev` until a release is tagged, and no release is tagged yet. the second field is the release counter of the package. `nerd U` and `kiss u` decide that a package changed by comparing both fields as strings, not by order, so **bump the release counter whenever another commit is packaged under the same version**, or an installed copy will not be seen as outdated.
+the package is `0.2.0 1`. the first field is the version of the library (`VOW_VERSION` in `include/vow.h`); during development it carries `-dev`, a release does not, and `mkpkg.sh` and `tests/release_check.sh` check that the header, the recipe and the sources file agree. the second field is the release counter of the package. `nerd U` and `kiss u` decide that a package changed by comparing both fields as strings, not by order, so **bump the release counter whenever another commit is packaged under the same version**, or an installed copy will not be seen as outdated.
 
 ## what it installs
 
@@ -35,7 +35,7 @@ the package is `0.2.0-dev 1`. the first field is the version of the library (`VO
 | `/usr/include/vow.h` | the header (`pledge`, `unveil`), c89 clean |
 | `/usr/share/licenses/vow/` | `LICENSE`, `GPL-3.0-only.txt`, `LGPL-3.0-only.txt`, `0BSD.txt`, `musl-COPYRIGHT` |
 | `/usr/share/doc/vow/` | `README.md`, `DESIGN.md`, `ROADMAP.md`, `LICENSING.md`, `vow-run.md` (design of the launcher and the profile format), `vow-run-wren.md` (running services under wren) |
-| `/usr/share/doc/vow/examples/` | the four example programs, 0BSD |
+| `/usr/share/doc/vow/examples/` | the four example programs, 0BSD, and `wren/`: the example of a wren service (a daemon, its run script, its profile, a readme; mode 644 here, the readme says how to install them) |
 
 nothing is installed under `/etc`. profiles live where the administrator puts them; `vow-run-wren.md` proposes `/etc/wren/vow/`, and creating it is up to whoever installs the first profile.
 
@@ -49,7 +49,7 @@ nothing is installed under `/etc`. profiles live where the administrator puts th
 
 ## tested
 
-`tests/package.sh` (run by `make test`): a throwaway git repository is made from the tree, `mkpkg.sh` is run from another directory on explicit commits, with uncommitted changes, with a revision that does not exist, with a commit whose version, `sources` or recipe is wrong; then the recipe builds from the unpacked tarball into a staging directory the way the package manager runs it; exactly the files above are installed, with the license texts, the 0BSD text, the unchanged musl notice and the examples of the tree; `vow-run` is static and checks a profile; a program links against the installed header and library and runs under `pledge`; the recipe refuses a compiler for another architecture and says that a libc other than musl is unsupported. also built and run once with `nerd c`, `nerd b` in a scratch repository on this machine, and the packaged binary was run from an extracted copy.
+`tests/package.sh` (run by `make test`, 55 checks): a throwaway git repository is made from the tree, `mkpkg.sh` is run from another directory on explicit commits, with uncommitted changes, with a revision that does not exist, with a commit whose version, `sources` or recipe is wrong, with a tag that does not match the recipe and with a development version under a release tag; then the recipe builds from the unpacked tarball into a staging directory the way the package manager runs it; exactly the files above are installed, with the license texts, the 0BSD text, the unchanged musl notice and the examples of the tree; `vow-run` is static and checks a profile; a program links against the installed header and library and runs under `pledge`; the recipe builds under an inherited `umask 077` and the staged tree has the same intended modes as under 022; the recipe refuses a compiler for another architecture and says that a libc other than musl is unsupported. `tests/release_check.sh` (30 checks of its own in `tests/release_check_test.sh`) is the check that a commit can be released: the archive is the commit byte for byte, the binary is static. also built and run once with `nerd c`, `nerd b` in a scratch repository on this machine, and the packaged binary was run from an extracted copy.
 
 ## install, upgrade and removal test (isolated root)
 
@@ -57,18 +57,18 @@ nothing is installed under `/etc`. profiles live where the administrator puts th
 
 **isolation.** the root is a directory under `build/tmp` that the test user owns (`KISS_ROOT`), so nerd never needs a privilege tool (it escalates only for a root the user does not own); `KISS_SU` points at a stub that records an attempt and fails, and none was recorded. nerd runs in a clean environment (`env -i`) with its own `KISS_PATH`, cache (`XDG_CACHE_HOME`) and temp directories (`KISS_TMPDIR`, `TMPDIR`) inside the scratch directory. every nerd call runs under `strace`; afterwards each call that could write is checked against the scratch directory (3404 writes in one run, covering nerd and the original kiss, none outside; the audit follows the working directory and the `chroot` of every process, is shown to flag a synthetic write outside, and fails if it sees fewer than 100 writes or if its script crashes, so a missing trace cannot pass). the 202 packages of the real package database were unchanged (sha256 over all its files, before and after) and so was the checkout. nerd documents this mode (its own tests use throwaway roots the same way); nothing here depends on a trick.
 
-**what ran, and the result** (kiss linux, nerd 0.3.0, kernel 7.2.9, as the unprivileged user; 44 checks passed and one skipped: the hook test needs root):
+**what ran, and the result** (kiss linux, nerd 0.3.0, kernel 7.2.9, as the unprivileged user; 48 checks passed and one skipped: the hook test needs root):
 
 | step | result |
 |---|---|
-| install `0.2.0-dev 1` next to an unrelated package and two unowned files | 24 files, `installed (24 files)`; exactly the 18 packaged files plus the 6 database files; binary 755, files 644, directories 755; `nerd l`, `owns`, `verify` (`39 files: all there`) agree |
+| install `0.2.0 1` next to an unrelated package and two unowned files | 28 files, `installed (28 files)`; exactly the 22 packaged files plus the 6 database files; binary 755, files 644, directories 755; `nerd l`, `owns`, `verify` (all there) agree |
 | package database entry | `var/db/kiss/installed/vow/` holds `build`, `checksums`, `manifest`, `sources`, `version` and the source tarball with the commit id; the manifest names the files, the database files and the directories (directories with a trailing slash, shared ones such as `/usr/share/doc/` included) |
 | the installed program and library | `vow-run` is static; `--check` accepts a profile and refuses a bad one with 125; it runs a static program under a pledge and passes its status back; a program links statically against the installed `libvow.a` and runs under `pledge` |
 | reinstall the same version | succeeds, same manifest, same file hashes, neighbours unchanged |
-| upgrade `0.2.0-dev 1` to `0.2.0-dev 2` (one example dropped, one file added), by `nerd U` | `U -n` lists `vow 0.2.0-dev-1 => 0.2.0-dev-2`; the dropped file is gone, the new file is there, the files on disk equal the manifest (no stale file), the database entry is replaced, the unowned note and the other package are unchanged |
+| upgrade `0.2.0 1` to `0.2.0 2` (one example dropped, one file added), by `nerd U` | `U -n` lists `vow 0.2.0-1 => 0.2.0-2`; the dropped file is gone, the new file is there, the files on disk equal the manifest (no stale file), the database entry is replaced, the unowned note and the other package are unchanged |
 | a changed package under the same release | not seen as newer: nerd compares version and release as strings, so the release number must be bumped when another commit is packaged (as documented above) |
 | a second package that ships `/usr/include/vow.h` | no overwrite: nerd warns `/usr/include/vow.h is now a choice of vowclash (see nerd a)`, vow stays the owner and keeps its header, the other file is parked in `var/db/kiss/choices`; the file only the other package owns is installed next to of vow; removing it cleans the choice and leaves vow complete |
-| remove vow | `removed (24 files)`; every file gone, the database entry gone, no empty directory left behind that vow created; every directory that existed before still exists; the unowned note inside `usr/share/doc/vow/` is kept (so is the directory), and the unrelated package and files are identical by path, mode and content |
+| remove vow | `removed (28 files)`; every file gone, the database entry gone, no empty directory left behind that vow created; every directory that existed before still exists; the unowned note inside `usr/share/doc/vow/` is kept (so is the directory), and the unrelated package and files are identical by path, mode and content |
 | install again after the removal | works, same files |
 
 **findings and packaging problems.**
@@ -87,7 +87,7 @@ nothing is installed under `/etc`. profiles live where the administrator puts th
 
 **how it is isolated.** phase 1 runs as the ordinary user: it builds every package (so the archives record the builder, uid and gid 1000, as they do when a package is built as a user) and runs the unprivileged test above. phase 2 runs the test again inside `unshare -Urm`, a disposable user and mount namespace in which the user is root (uid 0 inside is the uid of the user outside; only that one id is mapped, because the host has no subuid range, no `newuidmap` and no qemu). inside it `/home`, `/var/db/kiss` (the real package database) and the checkout are bind-mounted read-only, and the run is refused if a probe write to any of them succeeds. the root of the test is a directory owned by namespace-root in `/tmp`, `LOGNAME` is `root`, and `KISS_SU` is the failing stub. nothing is escalated on the host (no sudo, doas or su); if user namespaces are missing the test is skipped. phase 2 installs from the cache of phase 1 and checks that the archives were not rebuilt there.
 
-**what ran** (nerd 0.3.0, kiss linux, kernel 7.2.9; 49 checks, all passed): the whole flow of the first test (install, reinstall, upgrade, conflict, removal, the installed program and library) and, only as root:
+**what ran** (nerd 0.3.0, kiss linux, kernel 7.2.9; 51 checks, all passed): the whole flow of the first test (install, reinstall, upgrade, conflict, removal, the installed program and library) and, only as root:
 
 | check | result |
 |---|---|
@@ -111,11 +111,37 @@ nothing is installed under `/etc`. profiles live where the administrator puts th
 - the real database and a real upgrade of an installed copy. the install on the live root was not done and needs your explicit approval; nothing in the tests touches it.
 - a kernel without landlock, other kernels, other musl distributions (see below).
 
+## installing on the real root: the procedure (`tests/real_root_install.sh`)
+
+the install on a real root is a separate, explicit step, and it is a script so that the same checks run every time and nothing depends on memory. it is run as the ordinary user: nerd asks the privilege tool (`KISS_SU`, doas here) by itself for the one install and the one removal, and nothing else is escalated.
+
+```sh
+sh tests/real_root_install.sh preflight COMMIT    # read only on the system: says SAFE or NOT SAFE, changes nothing
+sh tests/real_root_install.sh install COMMIT      # the preflight again, the backup, nerd i, the verification; it undoes the install itself if the verification fails
+sh tests/real_root_install.sh verify              # the same verification, later
+sh tests/real_root_install.sh rollback            # nerd r vow, then the comparison with the state before
+```
+
+`COMMIT` is a full 40 digit commit id or a release tag. `HEAD` and branch names are refused, because they move, and an abbreviated id is refused because it is not exact. the package is made by `git archive` of that commit, the tarball must record the same id, and the working tree is never packaged.
+
+**what the preflight checks, all without writing to the system** (it builds the package as the user, in `~/.local/state/vow-install/`, under umask 022):
+- the revision: an exact commit; the version is the same in the header and the recipe; **the recipe of that commit sets `umask 022`** (a commit without the fix is refused); whether it is signed, on which branches, whether the working tree is dirty (information).
+- the system: the database exists and vow is not in it; no recipe called vow is in `KISS_PATH` before ours; no nerd or kiss is running; no `KISS_HOOK` (a hook would run as root); none of the target files exists and none is owned by a package; the directories the package adds to are `root:root 755` **and not empty** (nerd deletes a directory that a removal leaves empty, so a rollback could not put it back); no alternative mentions vow; `/usr` is writable; the privilege tool works without a prompt (`doas -n true`, a no-op).
+- resources: free space for two copies of the package database and the package, free inodes, room in the state directory; the whole database can be archived by the ordinary user with no error.
+- the package: only paths under `/usr` and the database entry of vow; nothing under `/etc`, nothing of wren; no setuid or setgid bit; no symlink, device or fifo; modes 755 and 644; none of its files is in the manifest of an installed package.
+- the state before: a listing of `/usr`, `/var/db/kiss` and `/etc/wren` (type, mode, owner, size, path), made by `tests/tree_listing.py`, never empty (an empty listing compares nothing, and a comparison that compares nothing passes: a script test caught this once).
+
+**backup and rollback.** before `nerd i` the install writes `var-db-kiss.tar` (the whole package database, with its sha256) and the listing into the state directory. the package is all new files (nothing it installs exists before), so the rollback is exactly `nerd r vow`, after which the listing of the root must be **identical** to the one before; if it is not, the script says what differs and prints the command that restores the database from the backup (`doas tar xf ... -C /` after removing `/var/db/kiss`; it is printed, never run).
+
+**what the verification compares after the install.** every entry that existed before is unchanged (type, mode, owner, size); the only new paths are the package; every path of the package is there with the owner of the install (`root:root` on the real root) and the intended mode; `nerd l` and `nerd verify` agree; **`/etc/wren` is identical entry for entry** and pid 1 is the same process (same start time); the installed `vow-run` is static, checks a profile, runs a program under a pledge; a program links against the installed library. nothing of wren or of any service is started, stopped, restarted or touched: the package has no hook and installs nothing under `/etc`.
+
+**how the script is tested** (`tests/real_root_install_test.sh`, 66 checks, part of `make test`; 17 mutants of the script): against scratch roots, never the real one, with every refusal (a moving revision, an abbreviated id, a recipe without the umask, a package that touches `/etc`, an existing target, an empty directory, an empty listing, an already installed vow), the preflight changing nothing, a good install, a backup that matches, a rollback that restores the root entry for entry, and installs that are spoiled after the fact (a changed old file, a stray file, a change under `/etc/wren`, a wrong mode, a wrong owner) which must be detected, undone, and reported with a non-zero status. what no scratch test can show: the privilege tool, the real `/var/db/kiss`, the real pid 1.
+
 ## unsupported and untested
 
 - **supported:** x86-64, musl, static. this is the one configuration that was built and run, on one machine (kiss linux, kernel 7.2.9, landlock abi 10).
 - **unsupported:** other architectures (the build script refuses them), glibc and any other libc (the build script warns and goes on, nothing is claimed), a shared library (only `libvow.a` is built).
-- **untested:** `kiss i` or `nerd i` on the **real root** (the two tests above cover nerd for this package in an unprivileged root and as root of a namespace, with the real system read-only; they do not touch the real database, and the namespace cannot show everything a real root can), the original kiss as real root, a cross build, other kernels, containers, systemd, other musl distributions.
+- **untested:** `kiss i` or `nerd i` on the **real root** (the two tests above cover nerd for this package in an unprivileged root and as root of a namespace, with the real system read-only; they do not touch the real database, and the namespace cannot show everything a real root can; the procedure above is ready and its preflight has been run against the real root, read only, but nothing has been installed there), the original kiss as real root, a cross build, other kernels, containers, systemd, other musl distributions.
 - **no `depends`:** a c compiler, `make`, `readelf` and (for `mkpkg.sh`) `git` and `gzip` are assumed. `WARN` is set on the `make` line without `-Werror`, so a newer compiler with a new warning does not stop the build.
 - **the kernel:** the package does not check it. `vow-run` needs landlock abi 3 or later for `unveil` and abi 6 or later for `stdio`, and one thread in the process; a kernel without landlock gives `vow-run` setup failures (status 125), not a package error.
 - **no man pages:** the documents are markdown.

@@ -10,6 +10,7 @@ set -e
 # git archive, which records the commit id in it (git get-tar-commit-id shows it). add outdir to KISS_PATH, run
 # 'kiss c vow' (or 'nerd c vow') once to write the checksums, then 'kiss b vow' and 'kiss i vow'.
 # no gnu tar: git archive writes the tar, gzip packs it, the checkout is never touched.
+# a revision that is a release tag (v0.2.0) must match the version of the recipe in it, see RELEASE.md.
 
 die() { echo "mkpkg: $*" >&2; exit 1; }
 
@@ -26,6 +27,15 @@ src=$(show dist/kiss/vow/sources)
 hdr=$(show include/vow.h | sed -n 's/^#define VOW_VERSION[[:space:]]*"\(.*\)"/\1/p')
 
 [ -n "$ver" ] || die "dist/kiss/vow/version of $sha is empty"
+
+# a release tag is a statement about the version: v0.2.0 must hold a recipe for 0.2.0, and a development version
+# is never a release. nothing in the commit names its own hash, the tag or the checksum of the tarball, so
+# tagging after the commit and packaging from the tag cannot disagree with the commit
+case $rev in
+v[0-9]*)
+    [ "$rev" = "v$ver" ] || die "the tag $rev does not match the version $ver of the recipe in it"
+    case $ver in *-dev*) die "the tag $rev holds a development version ($ver), not a release" ;; esac ;;
+esac
 [ "$hdr" = "$ver" ] || die "include/vow.h says $hdr but dist/kiss/vow/version says $ver (in $sha)"
 [ "$src" = "vow-$ver.tar.gz" ] || die "dist/kiss/vow/sources of $sha does not name vow-$ver.tar.gz"
 

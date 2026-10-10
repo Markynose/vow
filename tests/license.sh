@@ -50,7 +50,8 @@ for id in $ids; do
 done
 
 # the library side takes nothing from the GPL side
-if grep -rn "tools/\|profile\.h\|sysnames\.h" include src examples >/dev/null 2>&1; then bad "include, src or examples refer to tools/"; else ok "include, src and examples do not refer to tools/"; fi
+# (a pointer to a document in prose is not a dependency: only source that includes GPL-side files counts)
+if grep -rnE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(tools/|profile\.h|sysnames\.h)' include src examples >/dev/null 2>&1; then bad "include, src or examples include a file of the launcher"; else ok "include, src and examples include no file of the launcher"; fi
 if grep -rln "GPL-3.0-only" include src examples 2>/dev/null | xargs -r grep -L "LGPL-3.0-only" 2>/dev/null | grep -q .; then bad "GPL-only file on the library side"; else ok "no GPL-only file on the library side"; fi
 
 # the documents that explain it exist and name both licenses

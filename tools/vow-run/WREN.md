@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # vow-run under wren
 
-status: approved design and findings; nothing in wren is changed or will be. `vow-run --check` and the kiss package (`dist/kiss/vow`) now exist in this repository. wren (`~/src/wren`) was read, never built or modified there: it has uncommitted work, so a copy of `src/`, `etc/` and the `Makefile` was built in a scratch directory and run in its dev mode (`./wren -s servicedir`, which is the supervisor half without pid 1) against real `vow-run` services. kernel 7.2.9, musl, landlock abi 10.
+status: v0.2 is frozen. approved design and findings; nothing in wren is changed or will be. `vow-run --check`, the kiss package (`dist/kiss/vow`) and a complete tested example (`examples/wren/`, run by `tests/wren_example.sh`) exist in this repository. wren (`~/src/wren`) was read, never built or modified there: it has uncommitted work, so a copy of `src/`, `etc/` and the `Makefile` was built in a scratch directory and run in its dev mode (`./wren -s servicedir`, which is the supervisor half without pid 1) against real `vow-run` services. kernel 7.2.9, musl, landlock abi 10.
 
 ## conclusion
 
@@ -18,6 +18,8 @@ the real limit is not wren, it is what the promises can express today (section 7
 - a service has no exit status policy: every exit, whatever the status, is a restart.
 
 ## 2. the integration
+
+a complete, minimal example is in `examples/wren/`: a daemon (`exampled.c`), its run script, its profile and a readme that says where each file goes. `tests/wren_example.sh` (`make wren-test`) installs those exact files, with only the paths changed, into a scratch directory and runs them under a scratch build of wren in dev mode: the supervised pid is the daemon, it is sandboxed, it reads the file the profile unveils and cannot read another, it comes back sandboxed after `kill -9`, a missing profile gives status 125 and wren restarts with backoff, and the SIGTERM of wren reaches it. 16 checks; wren itself is only read.
 
 ```sh
 #!/bin/sh
@@ -109,8 +111,8 @@ nothing in wren. possible, small, separate pieces, none started:
 
 1. a package recipe for vow-run (done: `dist/kiss/vow`, which installs the binary, the library, the header and the documents, and creates no `/etc/wren` directory; wren and vow stay independent packages).
 2. `vow-run --check` (done, section 6).
-3. a profile and run script example under `dist/kiss/` in this repository, built around a test daemon, so the wiring is shown without pretending that sshd works.
-4. a wren vm scenario (a change in wren, to be agreed).
+3. a profile and run script example in this repository, built around a test daemon, so the wiring is shown without pretending that sshd works (done: `examples/wren/`, tested by `tests/wren_example.sh`).
+4. a wren vm scenario that boots a service under vow-run (a change in wren, to be agreed; v0.3).
 
 ## 9. decisions
 

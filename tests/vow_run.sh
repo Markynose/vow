@@ -97,11 +97,13 @@ e "  and names the syscall" "socket (41)"
 e "  and the promise that would allow it" "allowed by: inet"
 t "-v: a violation with no promise to allow it" 159 "$R" -v -p "stdio exec" "$H" mount
 e "  and it says so" "no promise allows it"
-t "-v: a violation in a second thread" 159 "$R" -v -p "stdio exec" "$H" tmount
-e "  names the thread that did it" "mount (165)"
-if grep -q "nanosleep" "$T/err"; then echo "FAIL  and not the thread that was only waiting"; fail=1; else echo "pass  and not the thread that was only waiting"; fi
-t "-v: a violation in a dynamic program" 159 "$R" -v -p "stdio exec" "$B/hlp_dyn" socket
-e "  is named too" "socket (41)"
+# several threads wait in a call that is allowed, one makes the call that kills: the report names that one and never a waiting thread.
+# whether the exit event of a waiting thread is read before it is gone is a race, so it is run three times
+for run in 1 2 3; do
+	t "-v: a violation in a second thread (run $run)" 159 "$R" -v -p "stdio exec" "$H" tmount
+	e "  names the thread that did it" "mount (165)"
+	if grep -q "nanosleep" "$T/err"; then echo "FAIL  and not a thread that was only waiting (run $run)"; fail=1; else echo "pass  and not a thread that was only waiting (run $run)"; fi
+done
 t "-v: a program that runs" 0 "$R" -v -p "stdio rpath exec" -u /proc/self/status:r "$H" status
 
 

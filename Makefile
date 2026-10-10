@@ -92,6 +92,9 @@ test: $(TESTS) $(HELPERS) $(EXAMPLES) $(TOOLS)
 	@sh tests/vow_run.sh
 	@sh tests/package.sh
 	@sh tests/license.sh
+	@sh tests/release_check_test.sh
+	@sh tests/docs_check.sh
+	@sh tests/real_root_install_test.sh
 	@if command -v python3 >/dev/null; then python3 tests/profile_fuzz.py 1 500; else echo 'SKIP  profile fuzz (no python3)'; fi
 
 $(B)/vow-run: tools/vow-run/vow-run.c $(B)/libvow.a src/filter.h src/sys.h tools/vow-run/sysnames.h tools/vow-run/profile.h tools/vow-run/profile.c
@@ -99,18 +102,29 @@ $(B)/vow-run: tools/vow-run/vow-run.c $(B)/libvow.a src/filter.h src/sys.h tools
 
 tools: $(TOOLS)
 
+helpers: $(HELPERS)
+
 $(B)/%: examples/%.c $(B)/libvow.a
 	$(CC) $(CFLAGS) $(WARN) $(DEFS) $(INC) -static -o $@ $< $(B)/libvow.a -pthread
 
 examples: $(EXAMPLES)
 
-# install, upgrade and removal of the kiss package with nerd in an isolated root (needs nerd, git, python3; strace for the audit)
+# install, upgrade and removal of the kiss package with nerd in an isolated root (needs nerd, git, python3; strace for the audit).
+# the package is built from the commit REV (default HEAD); REV=WORKTREE takes a throwaway commit of the working tree
 kiss-test: all tools
-	@sh tests/kiss_install.sh
+	@sh tests/kiss_install.sh $(REV)
 
 # the same as root of a disposable user and mount namespace, with the real system read-only (needs user namespaces)
 kiss-test-root: all tools
-	@sh tests/kiss_install_ns.sh
+	@sh tests/kiss_install_ns.sh $(REV)
+
+# the release check on a commit (default HEAD); with RELEASE=--release it is the check that a release must pass
+release-check: all tools
+	@sh tests/release_check.sh $(RELEASE) $(REV)
+
+# the example of a wren service under vow-run, run by a scratch build of wren in dev mode (needs the source of wren: WREN_SRC)
+wren-test: tools
+	@sh tests/wren_example.sh
 
 check-header:
 	@for s in c89 c99 c11 c17 c2x; do \
@@ -129,4 +143,4 @@ static-check: $(TESTS) $(TOOLS)
 clean:
 	rm -rf $(B)
 
-.PHONY: all tools examples test kiss-test kiss-test-root check-header static-check clean
+.PHONY: all tools helpers examples test kiss-test kiss-test-root release-check wren-test check-header static-check clean

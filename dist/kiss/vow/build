@@ -1,6 +1,11 @@
 #!/bin/sh -e
 # SPDX-License-Identifier: LGPL-3.0-only
 
+# the modes of the files and directories that this recipe creates must not depend on the umask of whoever builds:
+# `install -D` makes missing directories with the umask applied, and a package built under umask 077 would
+# record /usr as 700 (found by building under 077). the umask of the install step is another matter, see README.md
+umask 022
+
 # x86-64 only: the syscall numbers, the seccomp arch check and the landlock calls are written for it
 case $(${CC:-cc} -dumpmachine) in
 x86_64-*) ;;
@@ -52,4 +57,9 @@ install -Dm644 tools/vow-run/WREN.md    "$doc/vow-run-wren.md"
 # the examples are 0BSD: meant to be copied
 for f in examples/*.c; do
     install -Dm644 "$f" "$doc/examples/${f##*/}"
+done
+
+# the example of a service of wren under vow-run (its README says where each file goes)
+for f in README.md exampled.c sv/exampled/run vow/exampled.vow; do
+    install -Dm644 "examples/wren/$f" "$doc/examples/wren/$f"
 done

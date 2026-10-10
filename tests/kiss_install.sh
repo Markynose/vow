@@ -3,6 +3,7 @@
 # install, reinstall, upgrade, conflict and removal of the kiss package of vow with nerd, in an isolated root.
 #
 # usage: sh tests/kiss_install.sh [revision]      (default HEAD; the package is built from that commit)
+#        sh tests/kiss_install.sh WORKTREE        (the working tree, as a throwaway commit: for a tree that is not committed)
 #
 # nothing here touches the real system. the root is a directory under build/tmp (KISS_ROOT), owned by the
 # user, so nerd never needs a privilege tool; KISS_SU is a stub that records an attempt and fails. nerd runs
@@ -58,11 +59,11 @@ runtool() {
 	if command -v strace >/dev/null; then
 		strace -f -y -qq -e trace=openat,open,creat,unlink,unlinkat,rename,renameat,renameat2,mkdir,mkdirat,rmdir,symlink,symlinkat,link,linkat,chmod,fchmod,fchmodat,chown,fchown,fchownat,lchown,truncate,ftruncate,utimensat,mknod,mknodat,chdir,fchdir,chroot,clone,clone3,fork,vfork \
 		    -o "$(mktemp "$T/strace/$TOOL-XXXXXX")" env -i PATH="$PATH" HOME="$T/home" LOGNAME="$(id -un)" USER="$(id -un)" TERM=dumb TMPDIR="$T/tmp" \
-		    KISS_ROOT="$root" XDG_CACHE_HOME="$cachedir" KISS_TMPDIR="$T/tmp" KISS_PATH="$KP" KISS_SU="$T/su/stub" \
+		    KISS_ROOT="$root" XDG_CACHE_HOME="${RT_CACHE:-$cachedir}" KISS_TMPDIR="$T/tmp" KISS_PATH="$KP" KISS_SU="$T/su/stub" \
 		    KISS_PROMPT=0 KISS_COLOR=0 NERD_ANIM=0 "$TOOL" "$@"
 	else
 		env -i PATH="$PATH" HOME="$T/home" LOGNAME="$(id -un)" USER="$(id -un)" TERM=dumb TMPDIR="$T/tmp" KISS_ROOT="$root" \
-		    XDG_CACHE_HOME="$cachedir" KISS_TMPDIR="$T/tmp" KISS_PATH="$KP" KISS_SU="$T/su/stub" KISS_PROMPT=0 \
+		    XDG_CACHE_HOME="${RT_CACHE:-$cachedir}" KISS_TMPDIR="$T/tmp" KISS_PATH="$KP" KISS_SU="$T/su/stub" KISS_PROMPT=0 \
 		    KISS_COLOR=0 NERD_ANIM=0 "$TOOL" "$@"
 	fi
 }
@@ -94,6 +95,10 @@ expect_files() {
 /usr/share/doc/vow/examples/fileproc.c
 /usr/share/doc/vow/examples/netclient.c
 /usr/share/doc/vow/examples/progressive.c
+/usr/share/doc/vow/examples/wren/README.md
+/usr/share/doc/vow/examples/wren/exampled.c
+/usr/share/doc/vow/examples/wren/sv/exampled/run
+/usr/share/doc/vow/examples/wren/vow/exampled.vow
 /usr/share/doc/vow/vow-run-wren.md
 /usr/share/doc/vow/vow-run.md
 /usr/share/licenses/vow/0BSD.txt
@@ -106,8 +111,17 @@ X
 vowfiles_now() { (cd "$root" && find usr -type f 2>/dev/null | sed 's|^|/|' | sort | grep -E '^/usr/(bin/vow-run|include/vow.h|lib/libvow.a|share/doc/vow/|share/licenses/vow/)' | grep -v '/USER-NOTE$'); }
 
 # ---- packages: vow from the commit, an unrelated one, a clashing one ----
-sha=$(git rev-parse --verify "$rev^{commit}") || { echo "no such revision $rev"; exit 2; }
-(cd / && sh "$here/dist/kiss/mkpkg.sh" "$repo" "$sha") >/dev/null 2>&1 || { bad "mkpkg from $sha"; exit 1; }
+if [ "$rev" = WORKTREE ]; then
+	gitdir=$T/snap; mk=$gitdir/dist/kiss/mkpkg.sh
+	sha=$(sh "$here/tests/snapshot.sh" "$gitdir") || { echo "snapshot failed"; exit 2; }
+else
+	gitdir=$here; mk=$here/dist/kiss/mkpkg.sh
+	sha=$(git rev-parse --verify "$rev^{commit}") || { echo "no such revision $rev"; exit 2; }
+fi
+VER=$(git -C "$gitdir" show "$sha:dist/kiss/vow/version" | cut -d' ' -f1)
+REL=$(git -C "$gitdir" show "$sha:dist/kiss/vow/version" | cut -d' ' -f2)
+REL2=$((REL+1))
+(cd / && sh "$mk" "$repo" "$sha") >/dev/null 2>&1 || { bad "mkpkg from $sha"; exit 1; }
 k c vow >/dev/null 2>&1
 mkdir "$repo/base" "$repo/vowclash" "$repo/hookpkg"
 printf '1.0 1\n' >"$repo/base/version"
@@ -163,7 +177,7 @@ owners_ok() {
 
 # ---- install ----
 name="vow builds and installs from the commit"
-if build vow >"$T/o" 2>&1 && k i vow >>"$T/o" 2>&1 && [ "$(k l vow 2>/dev/null)" = "vow 0.2.0-dev-1" ]; then ok "$name"; else bad "$name"; tail -5 "$T/o"; fi
+if build vow >"$T/o" 2>&1 && k i vow >>"$T/o" 2>&1 && [ "$(k l vow 2>/dev/null)" = "vow $VER-$REL" ]; then ok "$name"; else bad "$name"; tail -5 "$T/o"; fi
 name="exactly the packaged files are installed"
 if [ "$(vowfiles_now)" = "$(expect_files)" ]; then ok "$name"; else bad "$name"; expect_files >"$T/e1"; vowfiles_now >"$T/e2"; diff "$T/e1" "$T/e2" | head -8; fi
 name="modes: the binary is 755, everything else 644, directories 755"
@@ -179,7 +193,7 @@ done
 db=$root/var/db/kiss/installed/vow
 name="every installed path and database file is owned by $ME (the user that ran nerd), not by the builder uid of the archive"
 owners_ok && ok "$name" || bad "$name"
-arch=$cachedir/kiss/bin/vow@0.2.0-dev-1.tar.gz
+arch=$cachedir/kiss/bin/vow@$VER-$REL.tar.gz
 aown=$(python3 -c '
 import sys, tarfile
 t = tarfile.open(sys.argv[1])
@@ -192,14 +206,14 @@ if [ $PRIV = 1 ]; then
 	else echo "SKIP  $name (the archive was built as $aown: build it as an ordinary user first, see tests/kiss_install_ns.sh)"; fi
 fi
 name="the package database entry is complete"
-if [ -f "$db/version" ] && [ "$(cat "$db/version")" = "0.2.0-dev 1" ] && [ -x "$db/build" ] && [ -s "$db/manifest" ] &&
-    [ -s "$db/sources" ] && [ -s "$db/checksums" ] && [ -s "$db/vow-0.2.0-dev.tar.gz" ]; then ok "$name"; else bad "$name"; ls "$db"; fi
+if [ -f "$db/version" ] && [ "$(cat "$db/version")" = "$VER $REL" ] && [ -x "$db/build" ] && [ -s "$db/manifest" ] &&
+    [ -s "$db/sources" ] && [ -s "$db/checksums" ] && [ -s "$db/vow-$VER.tar.gz" ]; then ok "$name"; else bad "$name"; ls "$db"; fi
 name="the manifest names exactly the packaged files, its own database files and its directories"
 grep -v '/$' "$db/manifest" | grep -v '^/var/db/kiss/installed/vow/' | sort >"$T/man_files"
 grep '^/var/db/kiss/installed/vow/' "$db/manifest" | grep -v '/$' | sort >"$T/man_db"
 expect_files | sort >"$T/man_want"
 printf '%s\n' /var/db/kiss/installed/vow/build /var/db/kiss/installed/vow/checksums /var/db/kiss/installed/vow/manifest \
-    /var/db/kiss/installed/vow/sources /var/db/kiss/installed/vow/version /var/db/kiss/installed/vow/vow-0.2.0-dev.tar.gz | sort >"$T/man_dbwant"
+    /var/db/kiss/installed/vow/sources /var/db/kiss/installed/vow/version /var/db/kiss/installed/vow/vow-$VER.tar.gz | sort >"$T/man_dbwant"
 if cmp -s "$T/man_files" "$T/man_want" && cmp -s "$T/man_db" "$T/man_dbwant" && grep -qx '/usr/share/doc/vow/' "$db/manifest" &&
     grep -qx '/usr/share/licenses/vow/' "$db/manifest" && grep -qx '/usr/share/doc/vow/examples/' "$db/manifest"; then ok "$name"; else bad "$name"; diff "$T/man_want" "$T/man_files" | head -5; diff "$T/man_dbwant" "$T/man_db" | head -5; fi
 name="owns: the files belong to vow, the others to base"
@@ -208,6 +222,49 @@ name="the unowned files and the other package are untouched by the install"
 snap >"$T/snap1"; if cmp -s "$T/snap0" "$T/snap1" && [ -f "$root/usr/share/doc/vow/USER-NOTE" ]; then ok "$name"; else bad "$name"; diff "$T/snap0" "$T/snap1" | head; fi
 name="verify finds nothing wrong"
 if k verify vow >"$T/o" 2>&1 && ! grep -qi "missing\|differ\|modified" "$T/o"; then ok "$name"; else bad "$name"; cat "$T/o" | head -5; fi
+
+# ---- the modes recorded in the archive: 755 for the binary and every directory, 644 for the rest (the payload; the
+# database skeleton that the package manager adds under ./var/db follows the umask of the builder, in nerd and in kiss) ----
+archive_modes() {
+	python3 - "$1" <<'PY'
+import sys, tarfile
+bad = []
+for m in tarfile.open(sys.argv[1]).getmembers():
+    if m.name == "." or m.name == "./var" or m.name.startswith("./var/db"): continue   # the database part is made by the package manager
+    elif m.isdir(): want = 0o755
+    elif m.name.endswith("/usr/bin/vow-run"): want = 0o755
+    elif m.isreg(): want = 0o644
+    else: continue
+    if m.mode != want: bad.append("%s is %o, wanted %o" % (m.name, m.mode, want))
+print("\n".join(bad[:5]))
+sys.exit(1 if bad else 0)
+PY
+}
+name="the payload of the archive in the cache records the intended modes"
+if archive_modes "$cachedir/kiss/bin/vow@$VER-$REL.tar.gz" >"$T/o" 2>&1; then ok "$name"; else bad "$name"; sed 's/^/    /' "$T/o"; fi
+if [ -z "${KI_CACHE:-}" ]; then
+	name="built by nerd under an inherited umask 077, the payload of the archive still records the intended modes"
+	( umask 077; k b vow >"$T/o" 2>&1 )
+	if archive_modes "$cachedir/kiss/bin/vow@$VER-$REL.tar.gz" >"$T/o2" 2>&1; then ok "$name"; else bad "$name"; sed 's/^/    /' "$T/o2"; fi
+	if command -v kiss >/dev/null; then
+		mkdir -p "$T/cache-kiss"
+		( umask 077; RT_CACHE="$T/cache-kiss" kk b vow >"$T/o3" 2>&1 )
+		name="and the whole archive has, entry by entry, the names and modes that the original kiss builds under the same umask"
+		if python3 - "$cachedir/kiss/bin/vow@$VER-$REL.tar.gz" "$T/cache-kiss/kiss/bin/vow@$VER-$REL.tar.gz" <<'PY'
+import sys, tarfile
+def modes(f): return {m.name: m.mode for m in tarfile.open(f).getmembers()}
+a, b = modes(sys.argv[1]), modes(sys.argv[2])
+d = sorted(x for x in set(a) | set(b) if a.get(x) != b.get(x))
+print("differ:", d[:5]) if d else None
+sys.exit(1 if d else 0)
+PY
+		then ok "$name"; else bad "$name"; tail -3 "$T/o3"; fi
+		low=$(python3 -c '
+import sys, tarfile
+print(len([m for m in tarfile.open(sys.argv[1]).getmembers() if m.name.startswith("./var/db") and m.mode == 0o700]))' "$cachedir/kiss/bin/vow@$VER-$REL.tar.gz")
+		echo "info  built under umask 077, $low entries of the database skeleton under ./var/db are mode 700 in the archive, in nerd and in kiss alike (the payload is not affected)"
+	fi
+fi
 
 # ---- the installed program and library ----
 V=$root/usr/bin/vow-run
@@ -239,7 +296,7 @@ case $rc in 3) ok "$name";; 125) echo "SKIP  $name (no landlock)";; *) bad "$nam
 # ---- reinstall the same version ----
 name="reinstalling the same package leaves the same files, the same entry and the neighbours alone"
 cp "$db/manifest" "$T/manifest1"; (cd "$root" && find usr -type f -path '*vow*' | sort | xargs sha256sum) >"$T/h1"
-if k i vow >"$T/o" 2>&1 && cmp -s "$db/manifest" "$T/manifest1" && [ "$(k l vow)" = "vow 0.2.0-dev-1" ] &&
+if k i vow >"$T/o" 2>&1 && cmp -s "$db/manifest" "$T/manifest1" && [ "$(k l vow)" = "vow $VER-$REL" ] &&
     [ "$(cd "$root" && find usr -type f -path '*vow*' | sort | xargs sha256sum)" = "$(cat "$T/h1")" ]; then
 	snap >"$T/snap2"; cmp -s "$T/snap0" "$T/snap2" && ok "$name" || { bad "$name (neighbours changed)"; diff "$T/snap0" "$T/snap2" | head -5; }
 	name="the owner is still $ME after the reinstall"; owners_ok && ok "$name" || bad "$name"
@@ -247,7 +304,7 @@ else bad "$name"; tail -3 "$T/o"; fi
 
 # ---- upgrade: release 2 with one example gone and one file new ----
 repo2=$T/repo2; mkdir "$repo2"; cp -R "$repo/vow" "$repo2/vow"
-printf '0.2.0-dev 2\n' >"$repo2/vow/version"
+printf '%s %s\n' "$VER" "$REL2" >"$repo2/vow/version"
 cat >>"$repo2/vow/build" <<'X'
 
 rm -f "$1/usr/share/doc/vow/examples/progressive.c"
@@ -255,9 +312,9 @@ printf 'second release\n' | install -Dm644 /dev/stdin "$1/usr/share/doc/vow/CHAN
 X
 KP=$repo2:$repo
 name="nerd U -n sees the newer release"
-if k U -n 2>&1 | grep -q "vow.*0.2.0-dev-1.*=>.*0.2.0-dev-2\|vow 0.2.0-dev-1 => 0.2.0-dev-2"; then ok "$name"; else bad "$name"; k U -n 2>&1 | head -3; fi
+if k U -n 2>&1 | grep -q "vow.*$VER-$REL.*=>.*$VER-$REL2\|vow $VER-$REL => $VER-$REL2"; then ok "$name"; else bad "$name"; k U -n 2>&1 | head -3; fi
 name="the upgrade builds and installs release 2"
-if k U >"$T/o" 2>&1 && [ "$(k l vow)" = "vow 0.2.0-dev-2" ]; then ok "$name"; else bad "$name"; tail -5 "$T/o"; fi
+if k U >"$T/o" 2>&1 && [ "$(k l vow)" = "vow $VER-$REL2" ]; then ok "$name"; else bad "$name"; tail -5 "$T/o"; fi
 name="the file that release 2 dropped is gone and the new one is there"
 if [ ! -e "$root/usr/share/doc/vow/examples/progressive.c" ] && [ -f "$root/usr/share/doc/vow/CHANGES" ]; then ok "$name"; else bad "$name"; fi
 name="no stale file of vow remains: the files on disk are exactly the manifest"
@@ -265,7 +322,7 @@ name="no stale file of vow remains: the files on disk are exactly the manifest"
 grep -v '/$' "$db/manifest" | grep -v '^/var/db/kiss/installed/vow/' | sort >"$T/inman"
 if cmp -s "$T/ondisk" "$T/inman"; then ok "$name"; else bad "$name"; diff "$T/inman" "$T/ondisk" | head -5; fi
 name="the version file, the source tarball and the recipe of release 2 replaced those of release 1"
-if [ "$(cat "$db/version")" = "0.2.0-dev 2" ] && grep -q "second release" "$db/build"; then ok "$name"; else bad "$name"; fi
+if [ "$(cat "$db/version")" = "$VER $REL2" ] && grep -q "second release" "$db/build"; then ok "$name"; else bad "$name"; fi
 name="the owner is $ME for every path of release 2, the new file included"
 owners_ok && ok "$name" || bad "$name"
 name="the unowned files and the other package survive the upgrade"
@@ -309,7 +366,7 @@ name="the unowned note and the neighbour package are still there"
 [ -f "$root/usr/share/doc/vow/USER-NOTE" ] && [ -f "$root/usr/lib/unowned.a" ] && [ -f "$root/etc/other.conf" ] && ok "$name" || bad "$name"
 name="installing again after the removal works"
 KP=$repo
-if k i vow >"$T/o" 2>&1 && [ "$(k l vow)" = "vow 0.2.0-dev-1" ] && [ "$(vowfiles_now)" = "$(expect_files)" ]; then ok "$name"; else bad "$name"; tail -3 "$T/o"; fi
+if k i vow >"$T/o" 2>&1 && [ "$(k l vow)" = "vow $VER-$REL" ] && [ "$(vowfiles_now)" = "$(expect_files)" ]; then ok "$name"; else bad "$name"; tail -3 "$T/o"; fi
 
 # ---- the original kiss as the reference: the same tarball, installed by both, under two umasks ----
 # what is compared: for every path of the root, the type, the mode, the owner and the content; and the manifest
@@ -327,9 +384,13 @@ if command -v kiss >/dev/null; then
 		root=$rk; ( umask $um; kk i vow >"$T/o2" 2>&1 ); okk=$?
 		root=$root_save
 		name="umask $um: nerd and the original kiss install the same tarball to the same tree (modes, owners, content, manifest)"
-		if [ $okn = 0 ] && [ $okk = 0 ] && cmp -s "$T/o" "$T/o" && [ "$(tree "$rn" | grep -v '/var/db/kiss/installed/vow/vow-0.2.0-dev.tar.gz')" = "$(tree "$rk" | grep -v '/var/db/kiss/installed/vow/vow-0.2.0-dev.tar.gz')" ]; then
+		if [ $okn = 0 ] && [ $okk = 0 ] && cmp -s "$T/o" "$T/o" && [ "$(tree "$rn" | grep -v "/var/db/kiss/installed/vow/vow-$VER.tar.gz")" = "$(tree "$rk" | grep -v "/var/db/kiss/installed/vow/vow-$VER.tar.gz")" ]; then
 			ok "$name"
 		else bad "$name (nerd rc $okn, kiss rc $okk)"; diff "$T/o" "$T/o2" | head -3; tree "$rn" >"$T/tn"; tree "$rk" >"$T/tk"; diff "$T/tn" "$T/tk" | head -6; fi
+		if [ $um = 022 ]; then
+			name="installed under the supported umask 022 the modes are 755 / 644 / 755"
+			[ "$(stat -c %a "$rn/usr/bin/vow-run"):$(stat -c %a "$rn/usr/share/doc/vow/README.md"):$(stat -c %a "$rn/usr/share/doc/vow")" = "755:644:755" ] && ok "$name" || bad "$name"
+		fi
 		echo "info  umask $um, both tools: binary $(stat -c %a "$rn/usr/bin/vow-run"), file $(stat -c %a "$rn/usr/share/doc/vow/README.md"), directory $(stat -c %a "$rn/usr/share/doc/vow"), owner $(stat -c %u:%g "$rn/usr/bin/vow-run")"
 	done
 	name="the owner is $ME for every path installed by nerd under both umasks"

@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: 0BSD
+# /etc/wren/sv/exampled/run: link /etc/wren/sv/exampled into /etc/wren/services to turn the service on.
+# exec, so that the process wren supervises is vow-run and then the daemon itself; absolute paths, because the
+# service starts in its own directory with whatever environment wren has; 2>&1 so that the messages of vow-run
+# go where the output of the daemon goes.
+exec /usr/bin/vow-run --profile /etc/wren/vow/exampled.vow -- /usr/bin/exampled /etc/exampled/motd /etc/passwd 2>&1

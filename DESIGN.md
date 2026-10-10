@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: LGPL-3.0-only -->
 # vow design
 
-status: milestones 1 to 3 are implemented and tested: `unveil()` with `s`, the seccomp generator and installer, and the promises `stdio`, `rpath`, `wpath`, `cpath`, `inet`, `exec`. signal isolation follows alternative S2 (section 2.7): `pledge` with `stdio` requires a landlock signal scope and fails otherwise; there is no pid based fallback. no further promise is planned for v0.1; the next work is a broader security review, tests across kernels and glibc compatibility (section 14).
+status: v0.1.0 is tagged. v0.2.0 is frozen and prepared (version `0.2.0`, not tagged yet). this file describes the library, which is the same as in v0.1.0 in everything but one thing: the narrowing check of `unveil` reads the type of the object it is checking (section 2.6, 27 of 667 pairs of permission sets that v0.1.0 refused are now accepted, each shown harmless on a real kernel). `unveil()` with `s`, `pledge()` with `stdio`, `rpath`, `wpath`, `cpath`, `inet` and `exec`, the signal scope (S2, section 2.7) and the refusal of a multithreaded commit (X2, section 2.6) are as they were. v0.2 adds around the library, without changing its api: the launcher `vow-run` with profiles (`tools/vow-run/DESIGN.md`), the example of a wren service (`tools/vow-run/WREN.md`), a kiss package (`dist/kiss/README.md`), licenses (`LICENSING.md`) and a release procedure (`RELEASE.md`). v0.2 is frozen: no new promise, no new public api, no major feature. new promises and the unfinished security investigations are planned for v0.3 (`ROADMAP.md`); the known limits below stay as they are until one of them changes one.
 
 vow is a small static library giving linux programs two openbsd-style calls: `pledge()` and `unveil()`. it is built on landlock (filesystem) and seccomp classic bpf (syscalls). it is not a port of openbsd semantics. where linux cannot enforce the same thing, vow rejects the request instead of pretending.
 
@@ -79,7 +79,7 @@ process start
   open everything that needs broad access (config, sockets, log files, output dirs)
   unveil(path, perms) ...            # collect rules, nothing enforced yet
   unveil(NULL, NULL)                 # commit: landlock enforced, unveil sealed
-  pledge("stdio rpath inet", NULL)   # install seccomp filter (not yet implemented)
+  pledge("stdio rpath inet", NULL)   # install the seccomp filter (and the signal scope for stdio)
   main loop
   pledge("stdio", NULL)              # tighten further whenever possible
 ```
@@ -512,6 +512,18 @@ other:
 - `io_uring`, `ptrace`, `bpf`, `perf_event_open` and similar are absent from every promise, so a pledge kills them. this is why pledge is an allowlist.
 - the process is not isolated from other processes: no pid or mount namespace is created.
 
+### the launcher and the services (v0.2): limits that `vow-run` adds (details in `tools/vow-run/DESIGN.md` and `WREN.md`)
+
+- **every profile needs `exec`**, because vow-run starts the program under the filter. the program can then execute any file that the profile unveils with `x`: keep `x` out of profiles.
+- **a dynamic program names its own interpreter.** vow-run checks it (an absolute path to an executable elf that has no interpreter itself) and unveils it `rx`, so a program file can choose any readable loader on the machine, for example a static executable. shared libraries are not found for the program: `-u` lists them, `rpath` lets the loader open them, and `LD_PRELOAD` and `LD_LIBRARY_PATH` are inherited unless `-i`.
+- **a profile is trusted configuration.** it is read once into memory, and a run during a rewrite can see a prefix of it (fewer lines). whoever can write the profile controls the policy.
+- **`--check` is not a promise of enforceability.** it validates the format and nothing that depends on the machine: paths, the narrowing check, the kernel, the program.
+- **`-v` costs something.** the program is traced for its whole life, job control is rough, and `ptrace` may be refused (`ptrace_scope`, containers); it fails loudly then. it is not for services of wren, where the supervised process would be the tracer.
+- **fail closed, no fallback.** if the sandbox cannot be applied the program does not run; under wren that is a restart every 30 seconds until the profile, the program or the kernel is fixed.
+- **no promise allows `fork`, unix sockets, terminals or `setuid`**, so the services that ship with wren on kiss linux (sshd, dhcpcd, syslogd, mdev, getty) cannot be sandboxed with v0.2. only single-process daemons that use files and tcp or udp fit.
+- **the package** is built and installed with nerd under umask 022; the original kiss is not a supported installer (it restores the owner recorded in the archive); the install on a real root and an upgrade of an installed copy were not tested (`dist/kiss/README.md`).
+- unchanged from the library: processes in one landlock domain can signal each other, descriptors from before the sandbox keep their power, `wpath` and `cpath` without unveil are broad, `inet` cannot filter addresses, `PROT_EXEC` is not w^x, the landlock layer limit is 16.
+
 ## 7. threads, fork, exec, descriptors
 
 - seccomp: `TSYNC` covers every current thread; new threads inherit. verified failure behavior (run): when another thread carries a filter that is not in the history of the caller, the call installs nothing and *returns the id of that thread* as a positive number (the test sees exactly the id of the conflicting thread). `vow_install` turns any positive return into `EBUSY`, `pledge()` changes nothing, and the same call works once that thread has gone. the `SECCOMP_FILTER_FLAG_TSYNC_ESRCH` flag would make this a plain error, but it needs linux 5.7 and is not used, so the positive-return path stays the one in use.
@@ -536,13 +548,14 @@ only `const char *` and `int` in prototypes, no `//` comments, no declarations a
 
 each test runs in a forked child, because restrictions are irreversible, with a 60 second alarm and core dumps off. exit 0 is a pass (or, for entries that name a signal, death by that signal), exit 77 a skip. the runner counts passes, failures and skips separately and fails if the table size is not the expected number, so a dropped test is noticed. skips are never counted as passes. all test binaries are linked `-static` against musl and `make static-check` verifies it.
 
-### unveil (`tests/unveil_test.c`, 61 tests)
+### unveil (`tests/unveil_test.c`, 62 tests)
 
 - arguments, rights (`r`, `rw`, `rwc`, `w` on a file, `r` on a file, `rx` exec of a static binary, exec without `x`, bare `x`/`wx`/`cx` refused, `c` on a file refused), lifecycle (sealed, seal-only, replace narrower and wider), conflict checks, escapes (symlink, `..`, `O_PATH` directory descriptor, `/proc/self/fd` reopen, cross-boundary rename and hardlink).
 - documented gaps asserted so a kernel change is noticed: earlier descriptors keep working; metadata calls work on hidden paths.
 - kernel side: `no_new_privs`; abi gate; commit refused with other threads, with a stricter sibling, without a thread list, with `/proc` hidden by an outside domain, with a thread made during the call; commit stacks on an outside domain; the thread list opened early and reopened by the child; raw `TSYNC` replaces a sibling domain (the reason for it all); failed commit does not seal and does not enforce; threads created after commit are restricted; 300 entries; forced allocation failures; `EMFILE`.
 - pathname unix sockets (abi >= 9 only, else skipped): connect allowed under `s` and denied elsewhere, denied by default without `s`, `s` on a socket file only, datagram `sendto`, existing connection keeps working (limit), server created inside the domain stays reachable (limit), abstract socket reachable (gap), `s` refused on a simulated abi 8, conflict check with `s`.
 - two raw-syscall tests prove why bare `x` is refused (execute alone fails, execute plus read works).
+- the narrowing check against the kernel (`t_conflict_matches_kernel`): for every pair of permission sets, with the inner object a directory, a regular file or a socket node, the library refuses the pair exactly when a ruleset of our own leaves extra access on the inner object (667 pairs: 178 accepted and enforced as asked, 489 refused and all of them leak), in both orders of the two rules.
 
 ### filter (`tests/filter_test.c`, 12 tests, no kernel filter needed)
 
@@ -572,6 +585,14 @@ each test runs in a forked child, because restrictions are irreversible, with a 
 - locks: raw fork keeps a lock, fork stress, fork from a secondary thread.
 - violations that must kill (`SIGSYS`): kill of parent, group, everything; foreign `tgkill`; `fork`; `mprotect`/`mmap` write+exec; a violation in a second thread; a thread that existed before the pledge; a thread created after; `socket`; `open`; `sendto` with an address; `setrlimit`; `prlimit64` of another process; `TIOCSTI`; `F_SETOWN`; an x32 number; `int 0x80`.
 
+### the launcher, the package and the release (v0.2; each has its own file, the counts are those of the release candidate)
+
+- `tests/fuzz_test.c` (3): the generator against the interpreter and the kernel on random tables.
+- `tests/vow_run.sh` (268 checks): exit statuses, refusals, unveil enforcement, the environment, descriptors, `-v` reports, static and dynamic programs, the interpreter checks, the races, profiles (every error of the format), `--check`, symlinks, profiles that change while they are read. `tests/profile_fuzz.py`: random and mangled profiles against an independent python implementation of the format, and `--check` against the same oracle.
+- `tests/package.sh` (55): the recipe built from the archive of a commit, the exact file set, the modes under an inherited umask 077, the license texts and the musl notice, the guards of `mkpkg.sh` (explicit revision, tags, versions, any directory, uncommitted changes left out). `tests/license.sh` (13): every file has the license of its place, the texts are the official ones, the library includes nothing of the launcher. `tests/examples.sh` (9). `tests/release_check_test.sh` (30) tests `tests/release_check.sh`, the check that a commit can be released, and `tests/docs_check.sh`, which fails when a document names a make target or a path that does not exist.
+- optional targets, not part of `make test`: `make kiss-test` and `make kiss-test-root` (`tests/kiss_install.sh`: 48 checks and one skip; `tests/kiss_install_ns.sh`: 51) install, reinstall, upgrade and remove the package with nerd in an isolated root, the second as root of a disposable user and mount namespace with the real system read-only; `make wren-test` (`tests/wren_example.sh`, 16) runs the example of a wren service under a scratch build of wren in its dev mode. `tests/real_root_install_test.sh` (66, part of `make test`) tests `tests/real_root_install.sh`, the procedure for installing the package on a real root, against scratch roots.
+- `tests/mutate.py` holds 132 mutants of the library, the launcher, the profile parser, the narrowing check, the recipe, `mkpkg.sh`, the release check, the license test and the example; every one must be caught, and the script removes `build/` when it ends. before it mutates anything it runs every test that will judge a mutant on the unmutated tree and refuses to start if one fails or skips, so that a mutant is never "caught" because a fixture is missing or a test is broken (`--no-preflight` for a quick single run).
+
 not done and not planned for v0.2: glibc (unsupported, section 14), runs on other kernels (untested), a build matrix.
 
 ## 11. repository and milestones
@@ -580,21 +601,26 @@ not done and not planned for v0.2: glibc (unsupported, section 14), runs on othe
 
 ```
 vow/
-├── DESIGN.md  ROADMAP.md  README.md  Makefile
+├── LICENSE  LICENSES/  LICENSING.md  third-party/musl/COPYRIGHT
+├── DESIGN.md  ROADMAP.md  RELEASE.md  README.md  Makefile
 ├── include/vow.h
 ├── src/{sys.h, filter.h, filter.c, unveil.c, pledge.c, fork.c, scope.c, lock.h}
-├── tests/{t.h, bpfi.h, oracle.h, nr_list.h, hdr.c, unveil_test.c, filter_test.c, seccomp_test.c}
-└── examples/
+├── tools/vow-run/{vow-run.c, profile.c, profile.h, sysnames.h, gen-sysnames.sh, DESIGN.md, WREN.md}
+├── examples/{cli.c, fileproc.c, netclient.c, progressive.c, wren/}
+├── dist/kiss/{mkpkg.sh, README.md, vow/{build, version, sources}}
+└── tests/{t.h, bpfi.h, oracle.h, nr_list.h, hdr.c, unveil_test.c, filter_test.c, seccomp_test.c, fuzz_test.c,
+           helper.c, hlp_so.c, libx.c, *.sh, profile_fuzz.py, mutate.py}
 ```
 
-`make` targets: `all` (libvow.a), `test`, `check-header`, `static-check`, `clean`. `CC` is overridable.
+`make` targets: `all` (libvow.a), `tools` (vow-run), `examples`, `test`, `check-header`, `static-check`, `clean`; optional: `kiss-test`, `kiss-test-root`, `wren-test`, `release-check` (`REV=` and `RELEASE=--release` take a revision and the strict mode). `CC` is overridable.
 
 1. unveil end to end, `s` permission (done)
 2. bpf generator, interpreter and oracle tests, kernel differential, installer, `pledge()` with `stdio` (done)
-3. promises: `rpath`, `wpath`, `cpath`, the open flag classification, `inet`, `exec` and the signal scope (done); the glibc runs are still open
-4. integration tests
-5. static musl validation (done); other kernels (section 14). glibc is deferred
-6. examples and docs (README not yet written)
+3. promises: `rpath`, `wpath`, `cpath`, the open flag classification, `inet`, `exec` and the signal scope (done)
+4. integration tests (done)
+5. static musl validation (done); other kernels and glibc: untested and unsupported (section 14)
+6. examples and docs (done)
+7. v0.2: the launcher, profiles, the example of a wren service, the kiss package, licenses, the release procedure (done; `ROADMAP.md`)
 
 ## 12. where linux cannot match openbsd
 
@@ -681,9 +707,19 @@ milestone 3 findings (path promises), decisions taken (open to review):
 - M3-7: pledge and unveil are serialized by spin locks, fork-safe through `pthread_atfork`, and refuse reentry from a signal handler with `EDEADLK`.
 - M3-8: unveil does not compensate for descriptors that are already writable, nor for anything when no unveil rule exists; documented in section 2.5 and section 6.
 
+resolved for v0.2 (2026-10-10):
+
+- v0.2 is frozen: no new promise, no new public api, no major feature. the only change of the library since v0.1.0 is the type-aware narrowing check of `unveil`, which accepts more and refuses nothing new.
+- the unfinished security investigations and the proposed promises (`dns`, `proc`, `unix`, `fattr`, a terminal and an id promise) move to v0.3 (`ROADMAP.md`). the limits they might change stay documented as they are (section 6).
+- platform: x86-64 linux, musl, static. everything else is unsupported or untested and is not a release requirement (section 14).
+- licenses: libvow LGPL-3.0-only, vow-run GPL-3.0-only, the examples 0BSD (`LICENSING.md`).
+- wren: integration is a run script that ends in `exec vow-run`, no change in wren; the dev-mode tests of a scratch build are the evidence for v0.2; wren as pid 1 and a real boot are untested.
+- the kiss package: nerd with umask 022 is the supported workflow, the recipe sets umask 022 itself so that the payload does not depend on the builder; the real-root install is untested and is not a release requirement.
+- release procedure without circularity: the release commit holds the final version and nothing derived from itself; checks run on it; the signed tag is made afterwards; the source archive is `git archive` of the commit that the tag names (`RELEASE.md`).
+
 ## 14. security review, cross-kernel and glibc work (glibc and other kernels: out of scope, unsupported or untested)
 
-the work after milestone 3 is a review, not new features. this section is the list and what has been found so far.
+the work after milestone 3 is a review, not new features. this section is the list and what has been found so far. the investigations that are still open (promises for processes, unix sockets and names, landlock net and ioctl rights, signal isolation beyond S2, capabilities) are planned for v0.3 in `ROADMAP.md`; what is written here stays valid.
 
 ### review done so far
 
@@ -722,7 +758,7 @@ not found, checked: lock order cannot cycle (`unveil` takes `plock` inside `uloc
   - fuzz of the generator against the interpreter and the kernel: done (`tests/fuzz_test.c`, six seeds clean).
   - existing seccomp filters and restricted environments: see "restricted environments" below.
 
-### hostile filesystem audit (tests in `tests/unveil_test.c`, 61 tests)
+### hostile filesystem audit (tests in `tests/unveil_test.c`, 62 tests)
 
 - the path given to `unveil` is opened once (`O_PATH`, the inode is pinned by the descriptor) and then resolved a second time to a string for the conflict check. if the two disagree (a symlink swapped between them) the call fails with `ESTALE` and records nothing. tested deterministically (hook after the open) and under a thread that swaps a link all the time (about 400 recorded and 1600 refused out of 2000 calls; every recorded rule was for one of the two targets). mutant 31 removes the check and is caught.
 - loops (`ELOOP`), a trailing slash on a file (`ENOTDIR`), names too long, missing middle components, an unreadable directory, names with blanks and newlines, `/proc/self/cwd` and device files behave as plain paths.

@@ -115,7 +115,7 @@ M = [
  ('license: a library file without its SPDX line', 'pledge.c', '/* SPDX-License-Identifier: LGPL-3.0-only */\n', ''),
  ('license: a library file under the GPL', 'lock.h', '/* SPDX-License-Identifier: LGPL-3.0-only */', '/* SPDX-License-Identifier: GPL-3.0-only */'),
  ('license: a launcher file under the LGPL', '../tools/vow-run/profile.c', '/* SPDX-License-Identifier: GPL-3.0-only */', '/* SPDX-License-Identifier: LGPL-3.0-only */'),
- ('license: the library refers to the launcher', 'fork.c', '/* SPDX-License-Identifier: LGPL-3.0-only */\n', '/* SPDX-License-Identifier: LGPL-3.0-only */\n/* see tools/vow-run/profile.h */\n'),
+ ('license: the library includes a file of the launcher', 'fork.c', '/* SPDX-License-Identifier: LGPL-3.0-only */\n', '/* SPDX-License-Identifier: LGPL-3.0-only */\n#include "../tools/vow-run/profile.h"\n'),
  ('license: a license text that is not the official one', '../LICENSES/LGPL-3.0-only.txt', 'GNU LESSER GENERAL PUBLIC LICENSE', 'GNU LESSER GENERAL PUBLIC LICENCE'),
  ('license: an example under the LGPL', '../examples/cli.c', '/* SPDX-License-Identifier: 0BSD */', '/* SPDX-License-Identifier: LGPL-3.0-only */'),
  ('license: the musl notice altered', '../third-party/musl/COPYRIGHT', 'Rich Felker', 'Rich Felkr'),
@@ -124,6 +124,43 @@ M = [
  ('package: the 0BSD text is not installed', '../dist/kiss/vow/build', 'install -Dm644 LICENSES/0BSD.txt            "$lic/0BSD.txt"\n', ''),
  ('package: the examples are not installed', '../dist/kiss/vow/build', 'install -Dm644 "$f" "$doc/examples/${f##*/}"', ':'),
  ('package: the tarball leaves out the third party notice', '../dist/kiss/mkpkg.sh', 'examples third-party |', 'examples |'),
+ ('package: the recipe sets no umask of its own', '../dist/kiss/vow/build', '\numask 022\n', '\n'),
+ ('wren example: the profile unveils all of /etc', '../examples/wren/vow/exampled.vow', 'unveil = /etc/exampled:r', 'unveil = /etc:r'),
+ ('wren example: the run script does not exec', '../examples/wren/sv/exampled/run', 'exec /usr/bin/vow-run', '/usr/bin/vow-run'),
+ ('wren example: the daemon ignores the file it must not read', '../examples/wren/exampled.c', 'fd = open(argv[2], O_RDONLY);\n\tif (fd < 0)', 'fd = -1;\n\tif (fd < 0)'),
+ ('release: a development version is allowed in a release', '../tests/release_check.sh', 'if [ $mode = release ]; then bad "$ver is a development version: a release has none"', 'if false; then bad "$ver is a development version: a release has none"'),
+ ('release: a tag on another commit is accepted', '../tests/release_check.sh', '[ "$tsha" = "$sha" ] && ok "$name" || bad "$name (it names $tsha)"', 'ok "$name"'),
+ ('release: the signature of an existing tag is not checked', '../tests/release_check.sh', 'git -C "$gd" tag -v "$tag" >/dev/null 2>&1 && ok "$name"', 'true && ok "$name"'),
+ ('release: the list of files in the archive is not compared', '../tests/release_check.sh', 'if cmp -s "$T/want.txt" "$T/got.txt"; then ok "$name"', 'if true; then ok "$name"'),
+ ('release: the bytes of the archive are not compared with the commit', '../tests/release_check.sh', 'git -C "$gd" cat-file blob "$h" | cmp -s - "$T/x/vow-$ver/$f" || { badc=1; echo "    differs: $f"; }', 'true'),
+ ('release: a dirty tree is accepted', '../tests/release_check.sh', 'if [ $mode = release ]; then bad "the working tree is not clean', 'if false; then bad "the working tree is not clean'),
+ ('release: a revision that is not HEAD is accepted', '../tests/release_check.sh', 'if [ $mode = release ]; then bad "the revision is not HEAD"', 'if false; then bad "the revision is not HEAD"'),
+ ('release: a version that differs between the header, the recipe and the sources is accepted', '../tests/release_check.sh', '[ -n "$ver" ] && [ "$hdr" = "$ver" ] && [ "$srcn" = "vow-$ver.tar.gz" ] && ok "$name" || bad "$name"', 'ok "$name"'),
+ ('release: the major and minor macros are not compared with the version', '../tests/release_check.sh', 'case $ver in "$maj.$min."*) ok "$name" ;; *) bad "$name" ;; esac', 'ok "$name"'),
+ ('release: a stale development string in a release is accepted', '../tests/release_check.sh', 'if [ $mode = release ]; then bad "$name"; else info "$name: $(echo', 'if false; then bad "$name"; else info "$name: $(echo'),
+ ('release: the working tree is accepted as a release', '../tests/release_check.sh', '[ $mode = release ] && { bad "a release is made from a commit, not from WORKTREE"; exit 1; }', ':'),
+ ('release: the build of the archive is not required to succeed', '../tests/release_check.sh', 'if (umask 077; cd "$T/x/vow-$ver" && "$T/pkg/vow/build" "$T/dest") >"$T/build.log" 2>&1; then ok "$name"; else bad "$name"; sed', 'if (umask 077; cd "$T/x/vow-$ver" && "$T/pkg/vow/build" "$T/dest") >"$T/build.log" 2>&1 || true; then ok "$name"; else bad "$name"; sed'),
+ ('package: mkpkg accepts a tag that is not the version of the recipe', '../dist/kiss/mkpkg.sh', '[ "$rev" = "v$ver" ] || die', 'true || die'),
+ ('package: mkpkg packages a development version from a release tag', '../dist/kiss/mkpkg.sh', 'case $ver in *-dev*) die "the tag', 'case $ver in *-devXX*) die "the tag'),
+ ('release: the documents are not checked for paths that do not exist', '../tests/docs_check.sh', 'if path not in tracked and not any(t.startswith(path + "/") for t in tracked):', 'if False:'),
+ ('release: the documents are not checked for make targets that do not exist', '../tests/docs_check.sh', 'if mm and mm.group(1) not in targets and not mm.group(1).startswith("build/"):', 'if False:'),
+ ('real-root: a recipe without umask 022 is accepted', '../tests/real_root_install.sh', 'if git -C "$REPO" show "$sha:dist/kiss/vow/build" | grep -q \'^umask 022$\'; then', 'if true; then'),
+ ('real-root: an abbreviated commit id is accepted', '../tests/real_root_install.sh', '*) [ ${#REV} = 40 ] || die "REV must be a full 40 digit commit id or a tag" ;;', '*) : ;;'),
+ ('real-root: a branch name is accepted', '../tests/real_root_install.sh', 'case $REV in v[0-9]*) ;; *) die "REV must be a full commit id or a release tag', 'case $REV in *) ;; esac; case $REV in v[0-9]*) ;; *) : "REV must be a full commit id or a release tag'),
+ ('real-root: an existing target file is accepted', '../tests/real_root_install.sh', 'if [ -e "$R/$p" ] || [ -L "$R/$p" ]; then bad "/$p already exists"; else', 'if false; then bad "/$p already exists"; else'),
+ ('real-root: a package that touches /etc, wren or anything outside /usr is accepted', '../tests/real_root_install.sh', 'if n.startswith("/etc") or "wren" in n.replace("/usr/share/doc/vow/examples/wren", "").replace("/usr/share/doc/vow/vow-run-wren.md", ""): bad.append("touches etc or wren: " + n)\n    if not (n.startswith("/usr/") or n.startswith("/var/db/kiss/installed/vow") or n in ("/usr", "/var", "/var/db", "/var/db/kiss", "/var/db/kiss/installed")): bad.append("outside /usr: " + n)', 'pass'),
+ ('real-root: a changed or removed old entry goes unnoticed', '../tests/real_root_install.sh', '[ ! -s "$S/gone-or-changed" ] && ok', 'true && ok'),
+ ('real-root: stray new files go unnoticed', '../tests/real_root_install.sh', 'extra=$(comm -13 "$S/allowed.paths" "$S/added.paths" | head -3); [ -z "$extra" ]', 'extra=; [ -z "$extra" ]'),
+ ('real-root: a change under /etc/wren goes unnoticed', '../tests/real_root_install.sh', 'if cmp -s "$S/wren.before" "$S/wren.after"; then ok', 'if true; then ok'),
+ ('real-root: a wrong owner or mode of a package file goes unnoticed', '../tests/real_root_install.sh', 'if (st.st_uid, st.st_gid) != want: bad.append', 'if False: bad.append'),
+ ('real-root: a failed verification does not undo the install', '../tests/real_root_install.sh', '\t\trejected=1\n\t\tmode=rollback', '\t\trejected=1\n\t\texit 1'),
+ ('real-root: a rejected install exits 0', '../tests/real_root_install.sh', 'echo "THE INSTALL WAS REJECTED: it did not pass the verification and was undone (exit status 1)"; exit 1; fi', 'echo "THE INSTALL WAS REJECTED"; exit 0; fi'),
+ ('real-root: the rollback does not compare the root with the state before', '../tests/real_root_install.sh', 'if cmp -s "$S/before.listing" "$S/after-rollback.listing"; then', 'if true; then'),
+ ('real-root: no backup is taken', '../tests/real_root_install.sh', '( cd "${R:-/}" && tar cf "$S/var-db-kiss.tar" var/db/kiss ) 2>"$S/backup.err"', ': >"$S/var-db-kiss.tar"; : >"$S/backup.err"; ( cd "${R:-/}" && tar cf "$S/var-db-kiss.tar" var/db/kiss/installed/nothing ) 2>/dev/null'),
+ ('real-root: a preflight records itself as the install that rollback undoes', '../tests/real_root_install.sh', '\techo\n\tif [ $fail = 0 ]; then echo "PREFLIGHT: SAFE TO INSTALL', '\techo "$S" >"$STATE_BASE/latest"\n\techo\n\tif [ $fail = 0 ]; then echo "PREFLIGHT: SAFE TO INSTALL'),
+ ('real-root: an empty directory that a removal would delete is accepted', '../tests/real_root_install.sh', '[ "$(ls -A "$R/$d" 2>/dev/null | wc -l)" -gt 0 ] || bad', 'true || bad'),
+ ('real-root: an already installed vow is accepted', '../tests/real_root_install.sh', '[ -f "$DB/installed/vow/version" ] && bad "vow is already installed', 'false && bad "vow is already installed'),
+ ('real-root: an empty listing is accepted', '../tests/real_root_install.sh', '[ "$(wc -l <"$S/before.listing")" -gt 3 ] && grep -q', 'true || grep -q'),
 ]
 
 def sh(cmd, t):
@@ -163,11 +200,51 @@ if "--restore" in sys.argv:
     restore_stale()
     sys.exit(0)
 restore_stale()
-only = sys.argv[1:]
+def kind(label, f):
+    """which test decides the fate of a mutant: the same order as the dispatch in the loop below"""
+    if f.startswith("../examples/wren/"): return "wren"
+    if label.startswith("real-root:"): return "realroot"
+    if label.startswith("release:"): return "release"
+    if label.startswith("license:"): return "license"
+    if f.startswith("../dist/"): return "package"
+    if f.startswith("../tools/"): return "vowrun"
+    return "lib"
+
+
+def preflight(kinds):
+    """every test that will judge a mutant must pass on the unmutated tree first, with nothing skipped. otherwise a mutant
+    can be 'caught' because a fixture is missing or a test is broken, which says nothing about the mutant."""
+    scripts = {"vowrun": "tests/vow_run.sh", "package": "tests/package.sh", "license": "tests/license.sh",
+               "release": "tests/release_check_test.sh", "wren": "tests/wren_example.sh",
+               "realroot": "tests/real_root_install_test.sh"}
+    sh("make all tools helpers 2>&1 | tail -1", 600)
+    bad = []
+    for k in sorted(kinds):
+        if k == "lib":
+            rc, out = sh("make build/filter_test build/fuzz_test build/seccomp_test build/unveil_test 2>&1 | grep -E 'error|job failed'", 300)
+            if out.strip(): bad.append((k, "does not build: " + out.strip()[:100])); continue
+            for t in ("filter_test", "fuzz_test", "unveil_test", "seccomp_test"):
+                rc, out = sh("TMPDIR=%s/build/tmp ./build/%s >/dev/null 2>&1; echo $?" % (root, t), 600)
+                if out.strip() != "0": bad.append((k, "%s fails on the unmutated tree" % t))
+        else:
+            rc, out = sh("sh %s 2>&1; echo \"status $?\"" % scripts[k], 900)
+            if "status 0" not in out or "FAIL" in out or "SKIP" in out:
+                bad.append((k, "%s: %s" % (scripts[k], "; ".join(l.strip() for l in out.splitlines() if l.startswith(("FAIL", "SKIP")))[:160] or out.strip()[-120:])))
+    if bad:
+        for k, why in bad: print("BASELINE NOT CLEAN (%s): %s" % (k, why), flush=True)
+        print("no mutant was run: a catch would not mean anything", flush=True)
+        sys.exit(2)
+    print("preflight: the unmutated tree passes every test that will judge a mutant (%s)" % ", ".join(sorted(kinds)), flush=True)
+
+only = [a for a in sys.argv[1:] if a != "--no-preflight"]
+preflight_on = "--no-preflight" not in sys.argv[1:]
 for sg in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(sg, on_signal)
 atexit.register(finish)
 os.makedirs(os.path.join(root, "build", "tmp"), exist_ok=True)
+if preflight_on:
+    selected = [(i, m) for i, m in enumerate(M) if not only or str(i) in only]
+    preflight({kind(m[0], m[1]) for i, m in selected})
 for i, (label, f, old, new) in enumerate(M):
     if only and str(i) not in only:
         continue
@@ -181,11 +258,37 @@ for i, (label, f, old, new) in enumerate(M):
     open(os.path.join(STATE, "stamp"), "w").write(p + "\n")
     open(p, "w").write(orig.replace(old, new, 1))
     try:
+        if label.startswith("real-root:"):
+            rc, out = sh("sh tests/real_root_install_test.sh 2>&1 | grep -E '^FAIL'", 600)
+            fails = [l.strip() for l in out.splitlines() if l.startswith("FAIL")]
+            if fails:
+                print("[%d] %s: CAUGHT by real_root_install_test.sh (%d failures; first: %s)" % (i, label, len(fails), fails[0][6:70]), flush=True)
+            else:
+                print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
+            continue
+        if label.startswith("release:"):
+            sh("make all tools 2>&1 | tail -1", 300)
+            rc, out = sh("sh tests/release_check_test.sh 2>&1 | grep -E '^FAIL'", 600)
+            fails = [l.strip() for l in out.splitlines() if l.startswith("FAIL")]
+            if fails:
+                print("[%d] %s: CAUGHT by release_check_test.sh (%d failures; first: %s)" % (i, label, len(fails), fails[0][6:70]), flush=True)
+            else:
+                print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
+            continue
         if label.startswith("license:"):
             rc, out = sh("sh tests/license.sh 2>&1 | grep -E '^FAIL'", 120)
             fails = [l.strip() for l in out.splitlines() if l.startswith("FAIL")]
             if fails:
                 print("[%d] %s: CAUGHT by license.sh (%d failures; first: %s)" % (i, label, len(fails), fails[0][6:70]), flush=True)
+            else:
+                print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
+            continue
+        if f.startswith("../examples/wren/"):
+            sh("make tools 2>&1 | tail -1", 300)
+            rc, out = sh("sh tests/wren_example.sh 2>&1 | grep -E '^FAIL'", 300)
+            fails = [l.strip() for l in out.splitlines() if l.startswith("FAIL")]
+            if fails:
+                print("[%d] %s: CAUGHT by wren_example.sh (%d failures; first: %s)" % (i, label, len(fails), fails[0][6:70]), flush=True)
             else:
                 print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
             continue
@@ -198,7 +301,7 @@ for i, (label, f, old, new) in enumerate(M):
                 print("[%d] %s: NOT CAUGHT" % (i, label), flush=True)
             continue
         if f.startswith("../tools/"):
-            rc, out = sh("make build/vow-run build/hlp_static build/hlp_dyn 2>&1 | grep -E 'error|job failed'", 300)
+            rc, out = sh("make tools helpers 2>&1 | grep -E 'error|job failed'", 300)
             if out.strip():
                 print("[%d] %s: BUILD FAILED: %s" % (i, label, out.strip()[:120]), flush=True)
                 continue

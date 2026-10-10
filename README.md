@@ -8,7 +8,7 @@ int unveil(const char *path, const char *permissions);
 int pledge(const char *promises, const char *execpromises);
 ```
 
-version 0.2.0-dev (the last release, tagged v0.1.0, has no `vow-run`). read the limits below before trusting it.
+version 0.2.0. v0.1.0 is the library alone; v0.2.0 adds the launcher `vow-run`, the example of a wren service, a kiss package, licenses and a release procedure, and is frozen: no new promise, no new public api. read the limits below before trusting it.
 
 ## use
 
@@ -43,12 +43,16 @@ if (pledge("stdio rpath wpath cpath", NULL) < 0)
 
 ```sh
 make                 # build/libvow.a
-make test            # unveil, filter, fuzz and seccomp tests (needs landlock and seccomp)
+make tools           # build/vow-run
+make test            # the library tests, and the tests of the examples, vow-run, the package, the licenses and the release check
+                     # (needs landlock and seccomp)
 make examples        # the programs in examples/, static, into build/
 make check-header    # c89 to c2x and c++
 make static-check
-python3 tests/mutate.py   # mutation check, every mutant must be caught
+python3 tests/mutate.py   # mutation check, every mutant must be caught (removes build/ when it ends)
 ```
+
+optional, not part of `make test` (they need nerd, strace or the source of wren): `make kiss-test` and `make kiss-test-root` install the package with nerd in an isolated root, the second as root of a disposable namespace; `make wren-test` runs the example of a wren service; `make release-check` checks a commit for release (`REV=`, `RELEASE=--release`); `sh tests/release_gate.sh` runs everything a release needs (`RELEASE.md`). `REV=WORKTREE` makes the install tests use the working tree instead of `HEAD`.
 
 link `build/libvow.a` and `-pthread`. use musl and `-static`.
 
@@ -66,6 +70,9 @@ the programs:
 - `fileproc`: read one file, write an upper cased copy into one directory
 - `netclient`: send a line to an ipv4 address and port (no name lookup, that needs files)
 - `progressive`: drop `rpath` after loading a config, then get killed on purpose by opening a file
+- `wren/`: a service of wren under vow-run (a daemon, its run script, its profile, a readme), tested by `make wren-test`
+
+the examples are 0BSD: copy them freely.
 
 ## vow-run
 
@@ -90,7 +97,7 @@ unveil = /tmp:rwc
 
 `vow-run --check editor.vow` only validates a profile (status 0, or 125 with the file and line) and installs and starts nothing; a pass does not promise that the profile can be enforced on a given machine or that the program runs under it.
 
-the profile format is strict (one `pledge`, any number of `unveil` lines, comments on their own line, absolute canonical paths, no includes or variables) and is checked completely before the sandbox is built; `--profile` cannot be combined with `-p` or `-u`. `-p` is the pledge string and must contain `exec`; `-u path:perms` is an unveil rule (the program itself is unveiled `rx` for you); `-i` clears the environment; `-v` stays as the parent and says which syscall killed the program. the loader of a dynamic program is unveiled for you; its shared libraries are not, list them with `-u` (and add `rpath`). scripts are refused for now. see `tools/vow-run/DESIGN.md`.
+the profile format is strict (one `pledge`, any number of `unveil` lines, comments on their own line, absolute canonical paths, no includes or variables) and is checked completely before the sandbox is built; `--profile` cannot be combined with `-p` or `-u`. `-p` is the pledge string and must contain `exec`; `-u path:perms` is an unveil rule (the program itself is unveiled `rx` for you); `-i` clears the environment; `-v` stays as the parent and says which syscall killed the program. the loader of a dynamic program is unveiled for you; its shared libraries are not, list them with `-u` (and add `rpath`). scripts are refused. see `tools/vow-run/DESIGN.md`; to run a service of wren under a profile see `examples/wren/` and `tools/vow-run/WREN.md`: none of the services that ship with wren on kiss linux can be sandboxed with the promises of v0.2.
 
 ## packages
 
@@ -109,14 +116,16 @@ read DESIGN.md sections 6, 12 and 14 for the full list. the main ones:
 - `wpath` and `cpath` without `unveil` are broad. descriptors opened before the sandbox keep their power.
 - `inet` cannot filter addresses or ports, `sendmsg` destinations are not filtered.
 - landlock allows at most 16 layers. `PROT_EXEC` is not w^x. `uprobe` bypasses seccomp.
+- no promise allows `fork`, unix sockets, terminals or `setuid` (planned for v0.3, `ROADMAP.md`): only single-process daemons that use files and tcp or udp can be sandboxed.
+- the launcher adds limits of its own (every profile needs `exec`, a program file chooses its interpreter, a profile is trusted configuration): DESIGN.md section 6, `RELEASE.md`.
 - see "platform" for what is supported, unsupported and untested.
 
 ## files
 
-- LICENSE, LICENSES/, LICENSING.md: which part is under which license, the texts, what they ask of you
+- LICENSE, LICENSES/, LICENSING.md: which part is under which license, the texts, what they ask of you; third-party/ holds the musl notice
 - DESIGN.md: how it works and why, decisions, security model
 - ROADMAP.md: stages
-- RELEASE.md: v0.1 checklist
+- RELEASE.md: the release procedure, the checklist, what ships as a known limit
 - include/vow.h, src/: the library
 - examples/: the programs above
 - tools/vow-run/: the launcher, its profile parser, its design (`DESIGN.md`) and the wren integration (`WREN.md`)

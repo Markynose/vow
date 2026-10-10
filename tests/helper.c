@@ -14,6 +14,14 @@
 #include <unistd.h>
 
 static void *
+wait_thread(void *a)
+{
+	(void)a;
+	sleep(5);
+	return NULL;
+}
+
+static void *
 mount_thread(void *a)
 {
 	(void)a;
@@ -59,9 +67,14 @@ main(int argc, char **argv)
 	}
 	if (strcmp(mode, "mount") == 0)	/* no promise allows this: the filter kills before the call runs */
 		return syscall(165 /* mount */, 0, 0, 0, 0, 0) == 0 ? 10 : 11;
-	if (strcmp(mode, "tmount") == 0) {	/* a second thread makes the call, the first one waits in a call that is allowed */
+	if (strcmp(mode, "tmount") == 0) {	/* several threads wait in a call that is allowed, then one makes the call that kills */
 		pthread_t t;
+		int i;
 
+		for (i = 0; i < 8; i++)
+			if (pthread_create(&t, NULL, wait_thread, NULL) != 0)
+				return 12;
+		usleep(100000);		/* let them reach their sleep before the call is made */
 		if (pthread_create(&t, NULL, mount_thread, NULL) != 0)
 			return 12;
 		sleep(5);

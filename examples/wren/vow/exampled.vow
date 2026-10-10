@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: 0BSD
+# /etc/wren/vow/exampled.vow: what the service may do. exec is needed by vow-run itself to start the daemon.
+# nothing is unveiled but the one directory, and it is read only.
+pledge = stdio rpath exec
+unveil = /etc/exampled:r

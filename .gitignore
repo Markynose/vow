@@ -5,3 +5,5 @@ build/
 examples/*
 !examples/*.c
 .make-shin.*/
+!examples/wren
+release-gate-log/

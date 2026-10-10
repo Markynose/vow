@@ -24,15 +24,7 @@ g() { git -C "$R" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@";
 
 # a repository with the current tree (tracked files and new ones that are not ignored) as its first commit
 R=$T/repo
-mkdir "$R"
-(git ls-files; git ls-files --others --exclude-standard) | sort -u | while read -r f; do
-	[ -f "$f" ] || continue
-	mkdir -p "$R/$(dirname "$f")"
-	cp -p "$f" "$R/$f"
-done
-git -C "$R" init -q 2>/dev/null
-g add -A
-g commit -q -m first
+sh tests/snapshot.sh "$R" >/dev/null
 C1=$(g rev-parse HEAD)
 ver=$(cut -d' ' -f1 dist/kiss/vow/version)
 MK=$R/dist/kiss/mkpkg.sh
@@ -47,7 +39,7 @@ name="mkpkg uses no gnu tar option and no tar at all"
 if grep -v "^#" "$R/dist/kiss/mkpkg.sh" | grep -qE "(^|[|;&(][ ]*)tar[ ]|--transform"; then bad "$name"; else ok "$name"; fi
 
 gzip -dc "$T/out/vow/vow-$ver.tar.gz" | tar t >"$T/list" 2>/dev/null
-for f in Makefile LICENSE LICENSES/GPL-3.0-only.txt LICENSES/LGPL-3.0-only.txt LICENSES/0BSD.txt third-party/musl/COPYRIGHT examples/cli.c LICENSING.md include/vow.h src/pledge.c src/unveil.c \
+for f in Makefile LICENSE LICENSES/GPL-3.0-only.txt LICENSES/LGPL-3.0-only.txt LICENSES/0BSD.txt third-party/musl/COPYRIGHT examples/cli.c examples/wren/exampled.c examples/wren/sv/exampled/run examples/wren/vow/exampled.vow LICENSING.md include/vow.h src/pledge.c src/unveil.c \
     src/filter.c tools/vow-run/vow-run.c tools/vow-run/profile.c tools/vow-run/profile.h tools/vow-run/sysnames.h README.md \
     DESIGN.md tools/vow-run/WREN.md; do
 	name="the tarball holds $f"
@@ -73,6 +65,27 @@ if sh "$MK" "$T/out4" "$C2" >/dev/null 2>&1 && gzip -dc "$T/out4/vow/vow-$ver.ta
 name="a name like HEAD~1 is accepted and resolved"
 if sh "$MK" "$T/out5" HEAD~1 >"$T/mk5.log" 2>&1 && grep -q "$C1" "$T/mk5.log"; then ok "$name"; else bad "$name"; fi
 
+# a release tag must match the version of the recipe, and a development version is never a release
+name="a tag that is not the version of its recipe is refused"
+g tag v9.9.9 HEAD
+if sh "$MK" "$T/o" v9.9.9 >"$T/neg.log" 2>&1; then bad "$name"; else if grep -q "does not match the version" "$T/neg.log"; then ok "$name"; else bad "$name (no message)"; fi; fi
+g tag -d v9.9.9 >/dev/null
+g tag "v$ver" HEAD
+name="a tag that is the version of its recipe is accepted if the version is a release"
+case $ver in
+*-dev*)
+	if sh "$MK" "$T/o" "v$ver" >"$T/neg.log" 2>&1; then bad "a development version was packaged from a release tag"; else grep -q "development version" "$T/neg.log" && ok "a development version is refused from a release tag (v$ver)" || bad "a development version is refused from a release tag (no message)"; fi ;;
+*)
+	if sh "$MK" "$T/o6" "v$ver" >"$T/mk6.log" 2>&1 && grep -q "$(g rev-parse HEAD)" "$T/mk6.log"; then ok "$name"; else bad "$name"; fi ;;
+esac
+g tag -d "v$ver" >/dev/null
+printf '%s-dev 1\n' "$ver" >"$R/dist/kiss/vow/version"; sed -i "s/^#define VOW_VERSION .*/#define VOW_VERSION \"$ver-dev\"/" "$R/include/vow.h"; printf 'vow-%s-dev.tar.gz\n' "$ver" >"$R/dist/kiss/vow/sources"; g commit -q -am devver
+g tag "v$ver-dev" HEAD
+name="a development version is refused when the revision is a release tag"
+if sh "$MK" "$T/o" "v$ver-dev" >"$T/neg.log" 2>&1; then bad "$name"; else grep -q "development version" "$T/neg.log" && ok "$name" || bad "$name (no message)"; fi
+g tag -d "v$ver-dev" >/dev/null
+g reset -q --hard HEAD~1
+
 # refusals
 name="mkpkg refuses a missing revision argument"
 if sh "$MK" "$T/o" >"$T/neg.log" 2>&1; then bad "$name"; else if grep -q "usage" "$T/neg.log"; then ok "$name"; else bad "$name (no message)"; fi; fi
@@ -97,6 +110,19 @@ gzip -dc "$T/out/vow/vow-$ver.tar.gz" | tar x -C "$T/x"
 name="the recipe builds"
 if (cd "$T/x/vow-$ver" && "$T/out/vow/build" "$T/dest") >"$T/build.log" 2>&1; then ok "$name"; else bad "$name"; sed 's/^/    /' "$T/build.log" | tail -5; fi
 
+# the same recipe under an inherited umask 077: the modes of the staged tree must not change
+mkdir "$T/x077" "$T/dest077"
+gzip -dc "$T/out/vow/vow-$ver.tar.gz" | tar x -C "$T/x077"
+name="the recipe builds under an inherited umask 077"
+if (umask 077; cd "$T/x077/vow-$ver" && "$T/out/vow/build" "$T/dest077") >"$T/build077.log" 2>&1; then ok "$name"; else bad "$name"; sed 's/^/    /' "$T/build077.log" | tail -5; fi
+modes() { (cd "$1" && find . | sort | while read -r f; do printf '%s %s\n' "$(stat -c %a "$f")" "$f"; done); }
+modes "$T/dest" >"$T/modes022"; modes "$T/dest077" >"$T/modes077"
+name="the staged tree has the same modes whatever the umask of the builder"
+if cmp -s "$T/modes022" "$T/modes077"; then ok "$name"; else bad "$name"; diff "$T/modes022" "$T/modes077" | head -6; fi
+name="and they are the intended ones: 755 for the binary and every directory, 644 for everything else"
+badm=$(awk '{ if ($2 == "./usr/bin/vow-run") want = 755; else if (system("test -d \"'"$T"'/dest077/" $2 "\"") == 0) want = 755; else want = 644; if ($1 != want) print $2 " is " $1 ", wanted " want }' "$T/modes077")
+if [ -z "$badm" ]; then ok "$name"; else bad "$name"; echo "$badm" | head -5 | sed 's/^/    /'; fi
+
 (cd "$T/dest" && find . -type f | sort) >"$T/files"
 cat >"$T/expect" <<'X'
 ./usr/bin/vow-run
@@ -110,6 +136,10 @@ cat >"$T/expect" <<'X'
 ./usr/share/doc/vow/examples/fileproc.c
 ./usr/share/doc/vow/examples/netclient.c
 ./usr/share/doc/vow/examples/progressive.c
+./usr/share/doc/vow/examples/wren/README.md
+./usr/share/doc/vow/examples/wren/exampled.c
+./usr/share/doc/vow/examples/wren/sv/exampled/run
+./usr/share/doc/vow/examples/wren/vow/exampled.vow
 ./usr/share/doc/vow/vow-run-wren.md
 ./usr/share/doc/vow/vow-run.md
 ./usr/share/licenses/vow/0BSD.txt

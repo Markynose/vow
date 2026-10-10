@@ -4,7 +4,7 @@
 
 #define VOW_VERSION_MAJOR 0
 #define VOW_VERSION_MINOR 2
-#define VOW_VERSION "0.2.0-dev"
+#define VOW_VERSION "0.2.0"
 
 #ifdef __cplusplus
 extern "C" {
